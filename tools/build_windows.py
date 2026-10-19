@@ -8,9 +8,10 @@ import argparse
 import os
 import subprocess
 import sys
-from PIL import Image, ImageDraw
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from small_mirror_brand import logo_image
 MODELS=('face_detection_yunet_2023mar.onnx','face_recognition_sface_2021dec.onnx',
         'LICENSE-YuNet.txt','LICENSE-SFace.txt')
 
@@ -22,10 +23,7 @@ def main():
     args=parser.parse_args()
     build=ROOT/'build';build.mkdir(exist_ok=True)
     # Original code-drawn brand mark, matching the app's own title-bar icon.
-    image=Image.new('RGBA',(256,256),(0,0,0,0));draw=ImageDraw.Draw(image)
-    draw.rounded_rectangle((0,0,255,255),56,fill='#55715D')
-    draw.ellipse((44,76,212,180),fill='white')
-    draw.ellipse((96,96,160,160),fill='#55715D')
+    image=logo_image(256)
     icon=build/'Crazy.ico'
     image.save(icon,sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
     data=[(ROOT/'models'/name,'models') for name in MODELS]
@@ -36,7 +34,7 @@ def main():
     for source,_destination in data:
         if source.is_symlink() or not source.is_file():raise SystemExit('Missing or linked build input: '+source.name)
     arguments=[sys.executable,'-m','PyInstaller','--noconfirm','--onefile',
-               '--noconsole','--noupx','--name','Crazy-v13-Beta',
+               '--noconsole','--noupx','--name','Crazy-v13.4-Beta',
                '--specpath',str(ROOT/'build'),'--workpath',str(ROOT/'build'/'pyinstaller'),
                '--distpath',str(ROOT/'dist'),'--paths',str(ROOT),
                '--icon',str(icon),
@@ -46,7 +44,7 @@ def main():
         arguments+=['--add-data',str(source)+os.pathsep+destination]
     arguments.append(str(ROOT/'small_mirror.py'))
     subprocess.run(arguments,cwd=ROOT,check=True)
-    print('LOCAL BUILD COMPLETE: dist/Crazy-v13-Beta.exe. Public distribution requires the source publication gate and binary privacy review.')
+    print('LOCAL BUILD COMPLETE: dist/Crazy-v13.4-Beta.exe. Public distribution requires the source publication gate and binary privacy review.')
 
 
 if __name__=='__main__':

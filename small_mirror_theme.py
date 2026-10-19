@@ -1,28 +1,31 @@
-"""Quiet desktop surfaces with one restrained green accent."""
+"""Dark desktop console with a restrained sage accent and native focus states."""
 from tkinter import ttk
 from PIL import Image, ImageDraw, ImageTk
 
 def configure_theme(app):
     style=ttk.Style(app.root);style.theme_use('clam')
     bg,panel,ink,muted,accent=app.BG,app.PANEL,app.TEXT,app.MUTED,app.ACCENT
-    line='#DFE4DE';app.button_images=[]
+    line=app.BORDER;soft=app.SOFT;app.button_images=[]
     style.configure('.',font=('Microsoft YaHei UI',10),background=bg,foreground=ink)
     style.configure('TFrame',background=bg);style.configure('TLabel',background=bg,foreground=ink)
     for name in ('Paper','Card'):
         style.configure(name+'.TFrame',background=panel)
         style.configure(name+'.TLabel',background=panel,foreground=ink)
+    style.configure('Card.TFrame',borderwidth=1,relief='solid',bordercolor=line)
     for name,colors,text,surface in (
-        ('TButton',('#FFFFFF','#F0F2EE','#E8ECE6','#F1F2EF','#FFFFFF'),ink,bg),
-        ('Paper.TButton',('#FFFFFF','#F0F2EE','#E8ECE6','#F1F2EF','#FFFFFF'),ink,panel),
-        ('Primary.TButton',(accent,'#49654F','#3E5845','#D7DED7',accent),'#FFFFFF',bg),
-        ('Quiet.TButton',(bg,'#E9EDE6','#DFE5DC',bg,bg),ink,bg)):
-        images=[];edge=round(40*app.ui_scale);radius=round(10*app.ui_scale)
+        ('TButton',(panel,soft,'#364B3C',panel,panel),ink,bg),
+        ('Paper.TButton',(panel,soft,'#364B3C',panel,panel),ink,panel),
+        ('Compact.TButton',(panel,soft,'#364B3C',panel,panel),ink,panel),
+        ('Primary.TButton',(accent,'#D0E3BF','#AAC790','#465343',accent),bg,bg),
+        ('Quiet.TButton',(bg,soft,'#364B3C',bg,bg),ink,bg)):
+        compact=name in ('Compact.TButton','Quiet.TButton')
+        images=[];edge=round((28 if compact else 34)*app.ui_scale);radius=round((7 if compact else 10)*app.ui_scale)
         # Supersample the nine-slice surface; corners remain smooth at 125/150% DPI.
         for index,color in enumerate(colors):
             q=3
             im=Image.new('RGB',(edge*q,edge*q),surface);d=ImageDraw.Draw(im)
-            d.rounded_rectangle((q,2*q,(edge-2)*q,(edge-1)*q),radius*q,fill='#E2E6DF')
-            outline=accent if index==4 else line if name in ('TButton','Paper.TButton') else color
+            d.rounded_rectangle((q,2*q,(edge-2)*q,(edge-1)*q),radius*q,fill='#111A14')
+            outline=accent if index==4 else line if name in ('TButton','Paper.TButton','Compact.TButton') else color
             d.rounded_rectangle((q,q,(edge-2)*q,(edge-2)*q),radius*q,fill=color,outline=outline,width=q)
             im=im.resize((edge,edge),Image.Resampling.LANCZOS)
             images.append(ImageTk.PhotoImage(im,master=app.root))
@@ -32,8 +35,8 @@ def configure_theme(app):
         style.layout(name,[(element,{'sticky':'nsew','children':[
             ('Button.focus',{'sticky':'nsew','children':[
                 ('Button.padding',{'sticky':'nsew','children':[('Button.label',{'sticky':'nsew'})]})]})]})])
-        style.configure(name,font=('Microsoft YaHei UI',10),padding=(14,10),foreground=text)
-        style.map(name,foreground=[('disabled','#67736A')])
+        style.configure(name,font=('Microsoft YaHei UI',9 if compact else 10),padding=(9,4) if compact else (14,8),foreground=text)
+        style.map(name,foreground=[('disabled',muted)])
     style.configure('TSeparator',background=line)
     style.configure('TLabelframe',background=bg,bordercolor=line)
     style.configure('TLabelframe.Label',background=bg,foreground=ink)
@@ -43,10 +46,12 @@ def configure_theme(app):
     style.configure('TCombobox',fieldbackground=panel,background=panel,foreground=ink,
                     arrowcolor=muted,bordercolor=line,lightcolor=line,darkcolor=line,padding=7)
     style.map('TCombobox',fieldbackground=[('readonly',panel)],selectbackground=[('readonly',panel)],selectforeground=[('readonly',ink)])
-    style.configure('TEntry',fieldbackground=panel,bordercolor=line,padding=7)
+    style.configure('TEntry',fieldbackground=panel,foreground=ink,insertcolor=ink,bordercolor=line,padding=7)
+    style.configure('TSpinbox',fieldbackground=panel,background=panel,foreground=ink,arrowcolor=muted,bordercolor=line,padding=7)
     style.configure('Treeview',background=panel,fieldbackground=panel,foreground=ink,rowheight=round(30*app.ui_scale),bordercolor=line)
     style.configure('Treeview.Heading',background=bg,foreground=muted,padding=(8,9))
-    style.map('Treeview',background=[('selected','#E6ECE3')],foreground=[('selected',ink)])
+    style.map('Treeview',background=[('selected',soft)],foreground=[('selected',ink)])
+    style.map('Treeview.Heading',background=[('active',soft)])
     style.configure('TCheckbutton',background=bg,foreground=ink,indicatorbackground=panel)
     style.map('TCheckbutton',background=[('active',bg)],indicatorbackground=[('selected',accent)])
     style.configure('Paper.TCheckbutton',background=panel,foreground=ink)
@@ -55,6 +60,7 @@ def configure_theme(app):
     style.configure('Beta.TLabel',background=bg,foreground=muted,font=('Segoe UI',9))
     style.configure('Status.TLabel',background=bg,foreground=accent,padding=(8,4))
     style.configure('Eyebrow.TLabel',background=bg,foreground=muted,font=('Segoe UI',9))
+    style.configure('Horizontal.TProgressbar',background=accent,troughcolor=soft,bordercolor=soft,lightcolor=accent,darkcolor=accent)
     # The stock clam indicator remains tiny on some Windows DPI settings.
     # Native ttk state handling is retained, with a scalable drawn indicator.
     for name,surface in (('TCheckbutton',bg),('Paper.TCheckbutton',panel)):
@@ -70,7 +76,7 @@ def configure_theme(app):
                                    outline=color if selected else muted,width=max(q,round(app.ui_scale*q)))
             if selected:
                 points=[(edge*q*.32,edge*q*.50),(edge*q*.45,edge*q*.63),(edge*q*.70,edge*q*.36)]
-                draw.line(points,fill='white',width=max(2*q,round(1.6*app.ui_scale*q)),joint='curve')
+                draw.line(points,fill=bg,width=max(2*q,round(1.6*app.ui_scale*q)),joint='curve')
             states.append(ImageTk.PhotoImage(im.resize((edge,edge),Image.Resampling.LANCZOS),master=app.root))
         app.button_images.extend(states);element='Crazy.'+name+'.indicator'
         style.element_create(element,'image',states[0],('disabled','selected',states[5]),

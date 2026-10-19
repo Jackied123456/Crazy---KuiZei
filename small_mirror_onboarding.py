@@ -32,7 +32,7 @@ def build_owner_window(app):
     hint=ttk.Label(copy,textvariable=app.owner_hint,anchor='center',justify='center',
         wraplength=width-round(50*s),foreground=app.MUTED,font=('Microsoft YaHei UI',10))
     hint.pack(fill='x')
-    app.owner_preview=tk.Canvas(panel,bg='#E6EAE3',height=round(290*s),highlightthickness=0)
+    app.owner_preview=tk.Canvas(panel,bg=app.PANEL,height=round(290*s),highlightthickness=0)
     app.owner_preview.grid(row=2,column=0,sticky='nsew',pady=round(12*s))
     app.owner_preview.bind('<Button-1>',app.owner_point)
     footer=ttk.Frame(panel);footer.grid(row=3,column=0,sticky='ew')
@@ -100,8 +100,10 @@ def draw_guide(app,packet,mapping):
         stage=status.get('stage',0)
         direction=('看镜头','← 往左一点','往右一点 →','↓ 下巴收一点')[min(3,stage)]
         y=max(oy+16*s,min(oy+dh-16*s,cy+radius+23*s))
-        canvas.create_rectangle(cx-92*s,y-16*s,cx+92*s,y+16*s,fill=app.TEXT,outline='')
-        canvas.create_text(cx,y,text=direction,fill='#FFFFFF',font=('Microsoft YaHei UI',12,'bold'))
+        half=min(92*s,max(30,dw/2-6*s))
+        cx=max(ox+half,min(cx,ox+dw-half))
+        canvas.create_rectangle(cx-half,y-16*s,cx+half,y+16*s,fill=app.BG,outline=app.BORDER)
+        canvas.create_text(cx,y,text=direction,fill=app.TEXT,font=('Microsoft YaHei UI',12,'bold'))
     elif app.owner_verifying and getattr(app,'owner_verified',False):
         canvas.create_text(cx,cy-radius-12*s,text='✓ 已认出你',fill=app.ACCENT,
             font=('Microsoft YaHei UI',11,'bold'))

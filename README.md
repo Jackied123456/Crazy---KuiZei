@@ -5,7 +5,7 @@
 [![Windows checks](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml/badge.svg)](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-52745B.svg)](LICENSE)
 ![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-52745B.svg)
-![Status: Beta](https://img.shields.io/badge/Status-v13%20Beta-777777.svg)
+![Status: Beta](https://img.shields.io/badge/Status-v13.4%20Beta-777777.svg)
 
 ## 忍了很久，最后还是打开了编辑器
 
@@ -98,15 +98,26 @@ TA还在看。
 
 一个在 Windows 本机运行的屏幕哨兵：检测后方观察者、尝试排除本人，按需遮挡指定窗口，并用动态相框提醒围观者。
 
-> v13 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
+> v13.4 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
-![窥贼 v13 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.0.0-beta.1/Crazy-v13-Beta-UI.png?preview=1)
+![窥贼 v13.4 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.4.0-beta.1/Crazy-v13.4-Beta-UI.png?preview=1)
 
 ## 下载
 
-Windows 用户可以前往 [v13 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v13.0.0-beta.1)，下载 `Crazy-v13-Beta-Windows.zip`，解压后运行 `Crazy-v13-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+Windows 用户可以前往 [v13.4 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v13.4.0-beta.1)，下载 `Crazy-v13.4-Beta-Windows.zip`，解压后运行 `Crazy-v13.4-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+
+## v13.4 的界面与流畅度改进
+
+- 托盘、窗口和程序文件统一使用窥贼 Logo；不再显示蓝色系统信息图标。
+- 深色控制台采用左侧后方画面、右侧本人录入 / 保护窗口 / 动画设置；小窗口下也保留主要操作入口。
+- 持续取帧与人脸识别分开，只保留最新一帧。实时预览不再等识别完成；回敬和录像仍要求检测结果新鲜、身份核对通过。
+- 开启保护自动显示后方画面；“显示画面”仅控制预览可见性，隐藏画面不会暂停保护。
+- 启动、关闭和错误提示完整替换，按实际文字高度排列；录入指引修正深色对比度，失败后可以重试。
+- 更新异常会暂停并提示，保留后续界面更新；已遮挡内容保持遮挡，等待用户主动恢复。
+
+已通过合成输入回归、独立 EXE 检查及不同缩放 / 窗口状态检查。模拟连续视频配合真实本地模型进行了设置、录入窗口和动画预览切换检查；这些结果不能替代对具体摄像头驱动和工位环境的实测。
 
 ## v13 的检测与显示改进
 
@@ -126,7 +137,7 @@ Windows 用户可以前往 [v13 Beta 下载页](https://github.com/Jackied123456
 
 ## 使用体验
 
-- 灰白底色、低饱和绿、可见的键盘焦点与高 DPI 控件。
+- 深色底色、低饱和绿、可见的键盘焦点与高 DPI 控件。
 - “认识我”、相机预览与保护窗口直接放在主页；动作预览放在设置里。
 - 支持多个检测区、多个保护区和应用窗口。窗口移动时，遮罩尝试跟随。
 - 本人模板在 Windows 当前账户下加密保存；运行时不上传图像，不下载模型。
@@ -145,7 +156,10 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python small_mirror.py
 ```
 
-先点“认识我”：确认画面里是你，跟着圆环按提示转头，完成后验证并点“保存并完成”。随后用“相机预览”设置后方检测区；选择保护窗口，点“试遮挡”确认覆盖成功后，再开始保护。
+1. 在“认识我”一栏点“录入本人”，进入向导后点“开始录入”。确认画面里是你，跟着圆环转头，验证通过后点“保存并完成”。
+2. 点“选择窗口”，选好需要保护的内容，再点“试遮挡”确认覆盖效果。
+3. 点“开始保护”开启相机。主页会自动显示后方画面；点“设置检测区”可以拖拽多个检测框，完成后点“完成”。
+4. 不想一直看相机画面时，取消“显示画面”即可；检测和保护继续运行。动画预览与动作选择在“设置 → 动画与台词”中。
 
 双击遮罩或按 `Ctrl+Alt+H` 恢复内容。窗口绑定只在当前会话有效，重启后需要重新选择。
 
@@ -165,12 +179,14 @@ py -3.12 -m venv .venv
 
 本人特征使用 Windows DPAPI 加密。录像是本地普通 AVI 文件，没有额外加密；当前 Windows 账户或有相应磁盘权限的程序可能读取它。见 [隐私说明](PRIVACY.md)。
 
-Windows 发行程序为 `Crazy-v13-Beta.exe`。
+Windows 发行程序为 `Crazy-v13.4-Beta.exe`。
+
+本人模板是本机录入后才产生的独立文件，不在源码或发行包里；`models/` 的 YuNet / SFace 是所有用户共用的预训练模型，不是作者或其他使用者的人像资料。公开 GitHub 仓库会展示代码提交历史，但不会自动收集本机文件、摄像头画面或开发对话。
 
 ## 检查与构建
 
 ```powershell
-.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media tests_small_mirror_reliability
+.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media tests_small_mirror_reliability tests_small_mirror_ui
 .\.venv\Scripts\python small_mirror.py --self-test
 .\.venv\Scripts\python -m pip install pyinstaller==6.22.3
 .\.venv\Scripts\python tools/build_windows.py
@@ -201,7 +217,7 @@ Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.js
 | `red-barrage.gif` | 连续回敬 |
 | `covered-giggle.gif` | 忍笑 |
 
-单个 GIF 最多 20 MB、300 帧、200 万像素；整组最多 60 MB，并限制解码后的总帧像素。文件内容在后台检查，只导入已知文件名，用户提供的节目配置不会被导入。导入内容保存在独立本地数据目录，公开构建始终不携带这些文件。“删除导入素材”恢复原创动画，不删除本人模板、设置和录像。只导入你有权使用的内容。
+单个 GIF 最多 20 MB、300 帧、200 万像素；整组最多 60 MB，并限制解码后的总帧像素。文件内容在后台检查，只导入已知文件名，用户提供的节目配置不会被导入。导入内容保存在独立本地数据目录，公开构建始终不携带这些文件。“删除导入素材”恢复本版本内置动画（公开版为原创哨兵），不删除本人模板、设置和录像。只导入你有权使用的内容。
 
 ## 素材与许可
 

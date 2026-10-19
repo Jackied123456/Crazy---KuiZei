@@ -44,6 +44,23 @@ class MediaTests(unittest.TestCase):
         config.write_text('untrusted programme',encoding='utf-8')
         self.assertEqual(media.portable_media_dir(self.builtin,executable),self.builtin)
 
+    def test_partial_or_broken_import_uses_embedded_clips_before_sentry(self):
+        import small_mirror_performer as performer
+        embedded=self.root/'embedded';embedded.mkdir()
+        for filename in performer.CLIP_FILES.values():(embedded/filename).write_bytes(gif())
+        (self.source/'programs.json').write_bytes((self.builtin/'programs.json').read_bytes())
+        (self.source/'patrol.gif').write_bytes(b'broken')
+        with patch.object(performer,'builtin_asset_dir',return_value=embedded):
+            renderer=PerformerFrameRenderer(self.source)
+        self.assertEqual(set(renderer._clips),set(performer.CLIP_FILES))
+        self.assertEqual(renderer.missing_assets,[])
+        self.assertIn('12/12 已加载',renderer.media_status())
+
+    def test_missing_assets_are_visible_in_status(self):
+        renderer=PerformerFrameRenderer(self.builtin)
+        self.assertIn('0/12',renderer.media_status())
+        self.assertIn('原创哨兵',renderer.media_status())
+
     def test_import_known_slots_and_ignore_unrelated_files_and_config(self):
         (self.source/'patrol.gif').write_bytes(gif())
         (self.source/'unrelated.gif').write_bytes(b'not a GIF')

@@ -11,13 +11,13 @@ import threading
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-BG = '#F4F5F2'
-PANEL = '#FFFFFF'
-TEXT = '#202722'
-MUTED = '#5F6D63'
-ACCENT = '#55715D'
-BORDER = '#DFE4DE'
-SOFT = '#EDF0EC'
+BG = '#1B2420'
+PANEL = '#243029'
+TEXT = '#ECF1E9'
+MUTED = '#B4C3B7'
+ACCENT = '#C1D8AB'
+BORDER = '#3C4E40'
+SOFT = '#2D3B31'
 
 MOTIONS = (
     ('patrol', '后排巡逻', None, 'cheeky'),
@@ -149,6 +149,11 @@ class _Clip:
         return min(bisect_right(self.ends, max(0, tick)), len(self.frames) - 1)
 
 
+def builtin_asset_dir():
+    # In a frozen build __file__ is inside the extracted application bundle.
+    return Path(__file__).resolve().parent/'assets'/'yaoshui'
+
+
 class _ClipLibrary:
     """Decode only static actor assets; never receives a camera frame or a Tk object."""
     def __init__(self, asset_dir, background=False):
@@ -159,15 +164,21 @@ class _ClipLibrary:
             pixels=0
             try:
                 for clip,filename in CLIP_FILES.items():
-                    try:
-                        # Publish each complete, immutable clip atomically.
-                        decoded=_Clip(Path(asset_dir)/filename)
-                        count=sum(frame.width*frame.height for frame in decoded.frames)
-                        if pixels+count>MAX_LIBRARY_PIXELS:raise ValueError('Local animation pack exceeds playback limits')
-                        self.clips[clip]=decoded
-                        pixels+=count
-                    except (OSError,ValueError,EOFError,Image.DecompressionBombError):
-                        self.missing.append(filename)
+                    locations=[Path(asset_dir)/filename]
+                    fallback=builtin_asset_dir()/filename
+                    if fallback not in locations:locations.append(fallback)
+                    for path in locations:
+                        try:
+                            # An incomplete/broken user pack can fall back to
+                            # this edition's embedded clip before the sentry.
+                            decoded=_Clip(path)
+                            count=sum(frame.width*frame.height for frame in decoded.frames)
+                            if pixels+count>MAX_LIBRARY_PIXELS:raise ValueError('Local animation pack exceeds playback limits')
+                            self.clips[clip]=decoded;pixels+=count
+                            break
+                        except (OSError,ValueError,EOFError,Image.DecompressionBombError):
+                            continue
+                    if clip not in self.clips:self.missing.append(filename)
             finally:
                 self.ready.set()
         if background:
@@ -218,6 +229,13 @@ class PerformerFrameRenderer:
     def wait_for_assets(self, timeout=10):
         """For command-line verification only; UI callers never wait for decoding."""
         return self._library.ready.wait(timeout)
+
+    def media_status(self):
+        count=len(self._clips);total=len(CLIP_FILES)
+        if not self._library.ready.is_set():return f'人物动图：正在准备 {count}/{total}'
+        if count==total:return f'人物动图：{count}/{total} 已加载'
+        if not count:return f'人物动图：0/{total} · 当前显示原创哨兵，可导入人物素材'
+        return f'人物动图：{count}/{total} · 缺少的动作会显示原创哨兵'
 
     def configure(self, motions=None, phrases=None):
         self.motions = normalize_choices(motions, [row[0] for row in MOTIONS], DEFAULT_MOTIONS)
@@ -431,6 +449,6 @@ class PerformerFrameRenderer:
             font = self._font(font.size-1,True)
         draw.text((x,y),state.phrase,font=font,fill=TEXT)
         label_font = self._font(10*s)
-        actor_label=f'本地动图 · {state.label}' if has_clip else ('屏幕哨兵 · 本地动画' if self._library.ready.is_set() else '正在准备本地动画…')
+        actor_label=f'本地动图 · {state.label}' if has_clip else ('原创哨兵 · 未加载该人物动作' if self._library.ready.is_set() else '正在准备人物动图…')
         draw.text((x,y+max(22,round(29*s))),actor_label,font=label_font,fill=MUTED)
         return image

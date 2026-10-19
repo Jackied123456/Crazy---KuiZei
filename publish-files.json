@@ -46,6 +46,7 @@
   "tests_small_mirror_shell.py",
   "tests_small_mirror_v7.py",
   "tests_small_mirror_windows.py",
+  "tests_small_mirror_ui.py",
   "tools/build_windows.py",
   "tools/check_open_source.py",
   "tools/source_archive.py",

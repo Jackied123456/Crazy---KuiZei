@@ -12,7 +12,7 @@ class NativeShellTests(unittest.TestCase):
     def setUp(self):
         self.user = MagicMock()
         self.user.RegisterWindowMessageW.return_value = 0x8888
-        self.user.LoadIconW.return_value = 123
+        self.user.CreateIconFromResourceEx.return_value = 123
         self.user.CreatePopupMenu.return_value = 456
         self.user.AppendMenuW.return_value = True
         self.user.GetCursorPos.return_value = True
@@ -33,6 +33,9 @@ class NativeShellTests(unittest.TestCase):
         self.tray = shell.NativeTray(self.root, *self.callbacks)
 
     def test_initial_tooltip_and_native_icon_flags(self):
+        self.assertEqual(self.tray.icon_data.hIcon,123)
+        self.user.CreateIconFromResourceEx.assert_called_once()
+        self.user.LoadIconW.assert_not_called()
         self.assertEqual(self.tray.icon_data.szTip, "窥贼 · Crazy · 监测中")
         self.assertEqual(self.tray.icon_data.uFlags, shell.NIF_MESSAGE | shell.NIF_ICON | shell.NIF_TIP)
         self.assertEqual(self.tray.icon_data.uCallbackMessage, shell.WM_TRAY)
@@ -84,6 +87,14 @@ class NativeShellTests(unittest.TestCase):
         self.window.close.assert_called_once_with()
         self.assertIsNone(self.tray.hwnd)
         self.assertTrue(self.tray.closed)
+        self.user.DestroyIcon.assert_called_once_with(123)
+
+    def test_failed_tray_registration_releases_owned_logo(self):
+        self.native_shell.Shell_NotifyIconW.return_value=False
+        with patch.object(shell,'_error',return_value=RuntimeError('tray unavailable')):
+            with self.assertRaisesRegex(RuntimeError,'tray unavailable'):
+                shell.NativeTray(self.root,*self.callbacks)
+        self.user.DestroyIcon.assert_called_once_with(123)
 
     def test_menu_is_destroyed_on_build_failure(self):
         self.user.AppendMenuW.return_value = False

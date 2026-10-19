@@ -19,7 +19,7 @@ import ctypes
 from ctypes import wintypes
 import sys
 import uuid
-from small_mirror_brand import PRODUCT_TITLE,PRODUCT_CN
+from small_mirror_brand import PRODUCT_TITLE,PRODUCT_CN,logo_icon_resource
 
 
 MOD_ALT = 0x0001
@@ -63,7 +63,6 @@ MF_CHECKED = 0x00000008
 TPM_RIGHTBUTTON = 0x00000002
 TPM_NONOTIFY = 0x00000080
 TPM_RETURNCMD = 0x00000100
-IDI_INFORMATION = 32516
 
 LRESULT = ctypes.c_ssize_t
 WPARAM = ctypes.c_size_t
@@ -137,8 +136,11 @@ class _WinAPI:
         u.DefWindowProcW.restype = LRESULT
         u.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
         u.RegisterWindowMessageW.restype = wintypes.UINT
-        u.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
-        u.LoadIconW.restype = wintypes.HICON
+        u.CreateIconFromResourceEx.argtypes=[ctypes.POINTER(ctypes.c_ubyte),wintypes.DWORD,
+                                            wintypes.BOOL,wintypes.DWORD,ctypes.c_int,ctypes.c_int,wintypes.UINT]
+        u.CreateIconFromResourceEx.restype=wintypes.HICON
+        u.DestroyIcon.argtypes=[wintypes.HICON]
+        u.DestroyIcon.restype=wintypes.BOOL
         s.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
         s.Shell_NotifyIconW.restype = wintypes.BOOL
         u.CreatePopupMenu.argtypes = []
@@ -285,12 +287,15 @@ class NativeTray:
         self.icon_data.uID = 1
         self.icon_data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         self.icon_data.uCallbackMessage = WM_TRAY
-        self.icon_data.hIcon = self.api.user32.LoadIconW(None, ctypes.c_void_p(IDI_INFORMATION))
+        resource=logo_icon_resource(32)
+        memory=(ctypes.c_ubyte*len(resource)).from_buffer_copy(resource)
+        self.icon_data.hIcon=self.api.user32.CreateIconFromResourceEx(memory,len(resource),True,0x00030000,32,32,0)
         self.icon_data.szTip = PRODUCT_TITLE+" · 监测中"
         if not self.icon_data.hIcon:
             self.window.close()
-            raise _error("无法加载系统托盘图标")
+            raise _error("无法加载窥贼托盘 Logo")
         if not self.api.shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self.icon_data)):
+            self.api.user32.DestroyIcon(self.icon_data.hIcon)
             self.window.close()
             raise _error("无法添加系统托盘图标")
 
@@ -349,6 +354,8 @@ class NativeTray:
             return
         self.closed = True
         self.api.shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self.icon_data))
+        self.api.user32.DestroyIcon(self.icon_data.hIcon)
+        self.icon_data.hIcon=None
         self.window.close()
         self.hwnd = None
 

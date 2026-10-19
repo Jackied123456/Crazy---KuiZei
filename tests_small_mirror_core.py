@@ -159,6 +159,9 @@ def fake_capture_check():
             self.reads += 1
             if self.reads == 1:
                 return True, frame
+            import time
+            deadline=time.monotonic()+3
+            while not worker.latest().ready and time.monotonic()<deadline:time.sleep(.005)
             snapshots.append(worker.latest())
             worker.stop()
             return False, None

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import ctypes
 import hashlib
 import json
@@ -106,11 +107,13 @@ def resized_rect(rect, edges, dx, dy, desktop, minimum=(140,100), maximum=(1920,
 
 
 class PrivacyApp:
-    BG = '#F4F5F2'
-    PANEL = '#FFFFFF'
-    TEXT = '#202722'
-    MUTED = '#5F6D63'
-    ACCENT = '#55715D'
+    BG = '#1B2420'
+    PANEL = '#243029'
+    TEXT = '#ECF1E9'
+    MUTED = '#B4C3B7'
+    ACCENT = '#C1D8AB'
+    BORDER = '#3C4E40'
+    SOFT = '#2D3B31'
 
     def __init__(self, root, data_dir=None, enable_shell=True):
         self.root = root
@@ -153,6 +156,7 @@ class PrivacyApp:
         self.closing = False
         self.last_serial = -1
         self.last_error = ''
+        self.camera_error = ''
         self.camera_fault = False
         self.observer_active = False
         self.observer_absent_since = None
@@ -209,6 +213,7 @@ class PrivacyApp:
         self.owner_summary=tk.StringVar(value='本人：已录入' if self.owner_samples else '本人：还没录入')
         self.record_summary=tk.StringVar(value='录像：已开启' if self.record_enabled.get() else '录像：关闭')
         self.record_indicator=tk.StringVar(value='')
+        self.media_status=tk.StringVar(value='人物动图：正在准备…')
         self.protection_summary=tk.StringVar(value='待开启 · 先认识你，再选择保护窗口')
         self.attention_since=None;self.attention_target=None;self.attention_hits=0;self.attention_serial=-1
         self.facing_timer=FacingTimer()
@@ -221,8 +226,8 @@ class PrivacyApp:
         self.region_var = tk.StringVar(value='保护区 0 个')
         self.detector_var = tk.StringVar(value='相机关闭 · 高灵敏度 · 完整头部特写')
         self.root.title(PRODUCT_TITLE+' · '+VERSION_LABEL)
-        window_height = min(round(640*self.ui_scale), max(500, self.root.winfo_screenheight()-80))
-        window_width = min(round(820*self.ui_scale), max(680, self.root.winfo_screenwidth()-60))
+        window_height = min(round(720*self.ui_scale), max(500, self.root.winfo_screenheight()-80))
+        window_width = min(round(960*self.ui_scale), max(680, self.root.winfo_screenwidth()-60))
         start_x=max(0,(self.root.winfo_screenwidth()-window_width)//2)
         start_y=max(0,(self.root.winfo_screenheight()-window_height)//2)
         self.root.geometry(f'{window_width}x{window_height}+{start_x}+{start_y}')
@@ -333,20 +338,21 @@ class PrivacyApp:
         build_home(self)
 
     def toggle_preview(self):
+        # Preview visibility is independent of capture/protection. Turning it
+        # off clears pixels immediately but never stops a running detector.
         if self.preview_enabled.get():
-            self.home_panel.pack_forget()
-            self.home_cards.pack_forget()
-            self.preview_toolbar.pack(fill='x',pady=(10,0),before=self.footer)
-            self.preview.pack(fill='both',expand=True,pady=14,before=self.footer)
+            self._preview_render_key=None
+            self.render_preview(self.current_packet())
         else:
-            self.finish_selection();self.preview.pack_forget();self.preview_toolbar.pack_forget()
-            self.home_panel.pack(fill='x',pady=(14,6),after=self.home_anchor)
-            self.home_cards.pack(fill='both',expand=True,pady=(0,12),before=self.footer)
+            self.finish_selection()
+            from small_mirror_home import draw_preview_placeholder
+            draw_preview_placeholder(self)
 
     def open_preferences(self, page='显示'):
         if self.preferences_window is not None and self.preferences_window.winfo_exists():
             if page == '保护':
                 self.preferences_tabs.select(2)
+            elif page == '相机':self.preferences_tabs.select(1)
             elif page == '动画':self.preferences_tabs.select(3)
             self.preferences_window.lift()
             return
@@ -424,15 +430,17 @@ class PrivacyApp:
         ttk.Label(protection,textvariable=self.protection_summary,foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(12,0))
         ttk.Label(performer,text='动画与台词',font=('Microsoft YaHei UI',16,'bold')).pack(anchor='w')
         ttk.Label(performer,text='看看触发后的相框。预览不会遮挡窗口、计次或录像。',foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(8,10))
+        ttk.Label(performer,textvariable=self.media_status,foreground=self.ACCENT,wraplength=520*self.ui_scale).pack(anchor='w',pady=(0,10))
         self.performer_preview_button=ttk.Button(performer,text='预览动画',command=self.preview_performer)
         self.performer_preview_button.pack(anchor='w',pady=(0,12))
         ttk.Button(performer,text='选择动作与台词',command=self.open_performer_panel).pack(anchor='w')
         row=ttk.Frame(performer);row.pack(anchor='w',pady=(10,0))
         ttk.Button(row,text='导入本地动图',command=self.import_local_media).pack(side='left',padx=(0,8))
         ttk.Button(row,text='删除导入素材',command=self.remove_local_media).pack(side='left')
-        ttk.Label(performer,text='默认使用原创哨兵。可导入有权使用的 GIF；命名见 README。\n6 组节目、3 种台词风格，默认静音。',foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(10,0))
+        ttk.Label(performer,text='有内置人物素材时自动使用；缺少素材时显示原创哨兵。\n6 组节目、3 种台词风格，默认静音。',foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(10,0))
         self.set_camera_controls(not self.paused)
         if page == '保护':tabs.select(protection)
+        elif page == '相机':tabs.select(camera)
         elif page == '动画':tabs.select(performer)
 
     def close_preferences(self):
@@ -474,14 +482,22 @@ class PrivacyApp:
         self.hide_bar(clear_deadline=True)
         self.active_media_dir=media_dir(self.data_dir,performer_asset_dir())
         self.performer_renderer=PerformerFrameRenderer(self.active_media_dir,self.performer_motions,self.performer_phrases,background=True)
+        self.update_media_status()
+
+    def update_media_status(self):
+        status=getattr(self,'media_status',None)
+        renderer=getattr(self,'performer_renderer',None)
+        if status is not None and renderer is not None:
+            value=renderer.media_status()
+            if status.get()!=value:status.set(value)
 
     def remove_local_media(self):
         if self.media_task is not None:
             self.detail_var.set('请等动图导入完成后再删除。');return
-        if not messagebox.askyesno('删除导入素材','删除本应用导入的动图并恢复原创哨兵？本人模板、设置和录像不受影响。',parent=self.preferences_window or self.root):return
+        if not messagebox.askyesno('删除导入素材','删除本应用导入的动图并恢复本版本内置动画？本人模板、设置和录像不受影响。',parent=self.preferences_window or self.root):return
         try:
             clear_packs(self.data_dir,disable_portable=True);forget_media_libraries(self.data_dir/'media-packs');self.reload_local_media()
-            self.detail_var.set('导入素材已删除，已恢复原创哨兵。')
+            self.detail_var.set('导入素材已删除，已恢复本版本内置动画。')
         except (OSError,ValueError) as exc:self.detail_var.set('素材未能删除：'+str(exc))
 
     def set_camera_controls(self, running):
@@ -737,9 +753,15 @@ class PrivacyApp:
     def render_owner_preview(self,packet):
         canvas=self.owner_preview
         if canvas is None or not canvas.winfo_exists():return
-        canvas.delete('all');width,height=max(1,canvas.winfo_width()),max(1,canvas.winfo_height())
+        width,height=max(1,canvas.winfo_width()),max(1,canvas.winfo_height())
+        key=(id(canvas),packet.serial,id(packet.frame),packet.error,width,height,self.owner_candidate,
+             self.enrolling,self.enroll_selected,self.owner_verifying,self.owner_verified,
+             tuple(sorted((packet.enrollment_status or {}).items())))
+        if key==getattr(self,'_owner_preview_key',None):return
+        self._owner_preview_key=key
+        canvas.delete('all')
         if packet.frame is None:
-            self.owner_preview_map=None
+            self.owner_preview_map=None;self.owner_preview_image=None
             message=packet.error or ('正在打开摄像头…' if self.enrolling else '点“开始录入”，把整张脸露出来。')
             canvas.create_text(width/2,height/2,text=message,fill=self.MUTED,width=max(100,width-30),font=('Microsoft YaHei UI',11));return
         fh,fw=packet.frame.shape[:2];dw,dh=core.fit_size(fw,fh,width,height);ox,oy=(width-dw)/2,(height-dh)/2
@@ -781,7 +803,14 @@ class PrivacyApp:
                 state='normal' if self.owner_verified else 'disabled',command=self.save_verified_owner)
             return
         if not self.enrolling:return
-        if packet.error:self.owner_status.set(packet.error);return
+        if packet.error:
+            self.owner_status.set(packet.error)
+            self.enroll_button.configure(text='重试开启相机',state='normal',command=self.begin_enrollment)
+            return
+        if not packet.ready:
+            self.owner_status.set('相机正在准备，先坐好，稍等一下。')
+            self.enroll_button.configure(text='等待相机画面…',state='disabled')
+            return
         if not self.enroll_selected:
             ready=self.owner_candidate is not None
             self.owner_status.set('框里是你吗？是的话，点下面“是我，开始”。' if ready else '画面里有几个人，点一下你自己的脸。' if packet.faces else '靠近一点，让整张脸出现在画面里。')
@@ -920,11 +949,13 @@ class PrivacyApp:
             return
         self.paused = False
         self.last_error = ''
+        self.camera_error = ''
         self.last_serial = -1
         self.reset_observer()
         self.worker = core.CameraWorker(index,self.owner_samples)
         self.worker.configure(self.rois, True, self.sensitivity.get(), self.resolution.get(), exclusions=self.exclusions)
         self.worker.start()
+        self.preview_enabled.set(True);self.toggle_preview()
         self.camera_button.configure(text='暂停', state='normal')
         self.set_camera_controls(True)
         self.detail_var.set('正在开启相机；本人核验后自动排除。' if self.owner_samples else '相机开启后，请点“认识我”录入本人。')
@@ -991,22 +1022,53 @@ class PrivacyApp:
 
     def current_packet(self):
         if self.worker is None or self.paused or self.worker.stop_event.is_set():
-            return core.FacePacket()
+            error=getattr(self,'camera_error','')
+            if self.worker:error=self.worker.latest().error or error
+            return core.FacePacket(error=error)
         packet = self.worker.latest()
         if (time.monotonic() - packet.timestamp > core.MAX_FRAME_AGE
                 or packet.identity_version!=self.worker.identity_version):
-            return core.FacePacket(error=packet.error)
+            phase='正在开启相机';elapsed=0
+            if hasattr(self.worker,'progress'):phase,elapsed=self.worker.progress()
+            note=phase if elapsed<10 else phase+' · 驱动响应较慢'
+            return core.FacePacket(error=packet.error,capture_info=note)
         return packet
 
     def tick(self):
+        """A failed UI callback must not silently kill all subsequent updates."""
+        self.tick_after=None
+        if self.closing:return
+        try:
+            self.tick_once()
+        except Exception as exc:
+            self.handle_runtime_error(exc)
+        finally:
+            if not self.closing:self.tick_after=self.root.after(42,self.tick)
+
+    def handle_runtime_error(self,exc):
+        self.paused=True
+        if self.worker:self.worker.stop()
+        # Already-hidden sensitive content stays hidden until explicit restore.
+        for cleanup in (self.reset_observer,lambda:self.hide_bar(clear_deadline=True),self.clear_mask_frames):
+            try:cleanup()
+            except Exception:pass
+        self.last_error='界面更新异常：'+str(exc)
+        self.camera_error=self.last_error
+        self.detail_var.set(self.last_error+'。已暂停，请重新开启；相机无法退出时请重启程序。')
+        self.status_var.set('遇到问题 · 已暂停')
+        self.camera_button.configure(text='重新开启',state='normal')
+
+    def tick_once(self):
         if self.closing:
             return
+        self.update_media_status()
         now = time.monotonic()
         packet = self.current_packet()
         if self.worker is not None and not self.worker.is_alive():
             latest = self.worker.latest()
             if latest.error:
                 self.last_error = latest.error
+                self.camera_error=latest.error
                 self.detail_var.set(latest.error)
             self.worker = None
             self.paused = True
@@ -1015,7 +1077,7 @@ class PrivacyApp:
             self.camera_button.configure(text='开始保护', state='normal')
             self.set_camera_controls(False)
             self.update_tray()
-            packet = core.FacePacket()
+            packet = core.FacePacket(error=latest.error)
         if packet.error and packet.error != self.last_error:
             self.last_error = packet.error
             self.detail_var.set(packet.error)
@@ -1028,9 +1090,9 @@ class PrivacyApp:
         self.sync_window_masks(now)
         self.owner_summary.set('本人：已认出你' if packet.owner_boxes else '本人：已录入' if self.owner_samples else '本人：还没录入')
         if self.paused:
-            self.status_var.set('正在关闭相机…' if self.worker else '已暂停 · 相机关闭')
+            self.status_var.set('运行异常 · 已暂停' if packet.error else '正在关闭相机…' if self.worker else '已暂停 · 相机关闭')
         elif not packet.ready:
-            self.status_var.set('相机开启中' if not packet.error else '相机异常')
+            self.status_var.set('相机准备中' if not packet.error else '相机异常')
         elif self.enrolling:
             self.status_var.set('本人录入中')
         elif self.owner_verifying:
@@ -1050,7 +1112,7 @@ class PrivacyApp:
             else:status='监测中'
             self.status_var.set(status)
         if self.root.state() == 'normal':
-            if self.preview_enabled.get():self.render_preview(packet)
+            if self.preview_enabled.get():self.render_preview(self.live_preview_packet(packet))
         if self.adjusting:
             self.show_bar(packet, force_placeholder=True)
         elif show_observer:
@@ -1061,7 +1123,20 @@ class PrivacyApp:
             self.show_bar(packet, force_placeholder=True)
         else:
             self.hide_bar()
-        self.tick_after=self.root.after(33, self.tick)
+
+    def live_preview_packet(self,packet):
+        """Fresh camera pixels are for local preview only, never event decisions."""
+        if self.paused or self.worker is None or not hasattr(self.worker,'preview_latest'):return packet
+        snapshot=self.worker.preview_latest()
+        if snapshot is None:return packet
+        _serial,captured_at,frame=snapshot
+        if time.monotonic()-captured_at>core.MAX_FRAME_AGE:return packet
+        # Box labels belong to recent matching-size detection frames only.
+        recent=(packet.frame is not None and frame.shape==packet.frame.shape
+                and time.monotonic()-packet.timestamp<.3)
+        return replace(packet,frame=frame,faces=packet.faces if recent else [],
+                       owner_boxes=packet.owner_boxes if recent else [],ready=True,
+                       face=None,roi=None,region_index=None,identity_ready=False,private_boxes=[])
 
     def on_observation(self, now):
         self.observer_active = True
@@ -1136,18 +1211,24 @@ class PrivacyApp:
         canvas = self.preview
         width, height = max(1, canvas.winfo_width()), max(1, canvas.winfo_height())
         key=(packet.serial,id(packet.frame),packet.error,width,height,tuple(map(tuple,self.rois)),
-             self.drag_start,self.drag_end,self.debug.get(),self.enrolling,self.attention_required.get(),self.paused)
+             self.drag_start,self.drag_end,self.debug.get(),self.enrolling,self.attention_required.get(),self.paused,packet.capture_info)
         if key==getattr(self,'_preview_render_key',None):return
         self._preview_render_key=key
-        canvas.delete('preview-overlay')
+        canvas.delete('preview-overlay');canvas.delete('preview-state')
         if packet.frame is None:
             canvas.delete('preview-frame')
             self.preview_image = self.preview_map = None
-            message = packet.error or '相机关闭\n开启后，用鼠标框选后方观察区域。'
+            message = packet.error or '相机已关闭'
+            note='点击“开始保护”开启相机，再设置后方检测区。'
+            if self.worker and self.paused and not packet.error:
+                message='正在关闭相机…'
+                note='相机资源释放后，可以再次开启保护。'
             if self.worker and not self.paused and not packet.error:
-                message = '正在开启相机…'
-            canvas.create_text(width / 2, height / 2, text=message, fill=self.MUTED,
-                               width=max(200, width - 60), font=('Microsoft YaHei UI', 11), justify='center',tags='preview-overlay')
+                message = packet.capture_info or '正在开启相机…'
+                note=('请检查相机是否被其他应用占用，或在设置里更换相机。'
+                      if '响应较慢' in message else '你可以继续操作界面，或点“暂停”。')
+            from small_mirror_home import draw_preview_state
+            draw_preview_state(self,message,note)
             self.detector_var.set('相机关闭' if self.paused else '等待有效画面')
             return
         frame = packet.frame

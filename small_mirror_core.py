@@ -468,6 +468,20 @@ class CameraWorker(threading.Thread):
         self.owner_samples = list(owner_samples)
         self.identity_version = 0
         self.commands = []
+        self.phase='等待启动';self.phase_since=time.monotonic()
+        self.reader=None
+
+    def preview_latest(self):
+        reader=self.reader
+        return reader.latest() if reader else None
+
+    def set_phase(self,phase):
+        with self.lock:
+            if phase!=self.phase:self.phase=phase;self.phase_since=time.monotonic()
+
+    def progress(self):
+        """UI reads this without waiting for a model or camera driver."""
+        with self.lock:return self.phase,max(0,time.monotonic()-self.phase_since)
 
     def identity_command(self, action, value=None):
         with self.lock:
@@ -494,10 +508,10 @@ class CameraWorker(threading.Thread):
             return self.packet
 
     def publish(self, frame=None, detection=None, error="", ready=False, identity_ready=False,
-                identity_version=0, owner_boxes=(), private_boxes=(), enrollment_status=None, enrollment_samples=()):
+                identity_version=0, owner_boxes=(), private_boxes=(), enrollment_status=None, enrollment_samples=(),captured_at=None):
         detection = detection or DetectionResult()
         with self.lock:
-            self.packet = FacePacket(serial=self.packet.serial + 1, timestamp=time.monotonic(),
+            self.packet = FacePacket(serial=self.packet.serial + 1, timestamp=time.monotonic() if captured_at is None else captured_at,
                                      frame=frame, face=detection.face, roi=detection.roi,
                                      region_index=detection.region_index, faces=detection.faces,
                                      error=error, ready=ready, capture_info=self.capture_info,
@@ -507,6 +521,7 @@ class CameraWorker(threading.Thread):
 
     def stop(self):
         self.stop_event.set()
+        self.set_phase('正在关闭相机')
         self.publish()  # Drop the live frame immediately; the driver releases in finally.
 
     @staticmethod
@@ -531,8 +546,10 @@ class CameraWorker(threading.Thread):
     def run(self):
         capture = None
         try:
+            self.set_phase('正在加载人脸检测模型')
             detector = YuNetDetector()
             from small_mirror_identity import SFace, OwnerTracker, Enrollment
+            self.set_phase('正在加载本人核对模型')
             recognizer = SFace(cv2)
             tracker = OwnerTracker(recognizer,self.owner_samples)
             enrollment = None
@@ -541,6 +558,7 @@ class CameraWorker(threading.Thread):
             if self.stop_event.is_set():
                 return
             backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+            self.set_phase('正在连接摄像头')
             capture = cv2.VideoCapture(self.index, backend)
             if not capture.isOpened() and not self.stop_event.is_set():
                 capture.release()
@@ -549,7 +567,13 @@ class CameraWorker(threading.Thread):
                 raise RuntimeError("无法开启摄像头。请检查相机编号、系统权限，或关闭占用相机的应用。")
             applied_resolution = None
             zoom_info = ""
-            failures = 0
+            self.set_phase('正在设置相机分辨率')
+            zoom_info=self._request_capture(capture,self.resolution)
+            applied_resolution=self.resolution
+            self.reader=LatestCameraFrames(capture,self.stop_event)
+            self.set_phase('正在等待相机画面')
+            self.reader.start()
+            consumed=0;waiting_since=time.monotonic()
             while not self.stop_event.is_set():
                 started = time.monotonic()
                 with self.lock:
@@ -566,24 +590,26 @@ class CameraWorker(threading.Thread):
                     elif action=='retry' and enrollment:enrollment.retry()
                     elif action=='cancel':enrollment=None
                 if resolution != applied_resolution:
-                    zoom_info = self._request_capture(capture, resolution)
-                    applied_resolution = resolution
-                ok, frame = capture.read()
+                    # Device settings are changed only after pausing. Calling
+                    # capture.set concurrently with capture.read is unsafe.
+                    raise RuntimeError('相机配置已更改，请暂停后重新开启。')
+                self.set_phase('正在等待相机画面')
+                snapshot=self.reader.take(consumed,.2)
                 if self.stop_event.is_set():
                     break
-                if not ok or frame is None:
-                    failures += 1
-                    self.publish(error="暂时无法读取相机画面，正在重试。")
-                    if failures >= 5:
-                        raise RuntimeError("相机画面已中断，请关闭后重新开启摄像头。")
-                    self.stop_event.wait(0.1)
+                if snapshot is None:
+                    if self.reader.error:raise RuntimeError(self.reader.error)
+                    if time.monotonic()-waiting_since>12:
+                        raise RuntimeError('相机长时间没有返回画面。请关闭占用相机的应用，检查权限或更换相机编号。')
                     continue
-                failures = 0
+                consumed,captured_at,frame=snapshot;waiting_since=time.monotonic()
                 height, width = frame.shape[:2]
                 self.capture_info = (f"实际 {width}×{height}（请求 {resolution}） · 软件无裁切 · "
                                      f"{zoom_info} · 镜头视角由硬件决定")
                 # Identity replaces the legacy spatial owner exclusion.
+                self.set_phase('正在识别人脸')
                 detection = detector.detect(frame, rois, sensitivity, [])
+                if self.stop_event.is_set():break
                 tracker.update(frame,detection.faces,time.monotonic())
                 owner_boxes = tracker.owner_boxes(time.monotonic())
                 private_boxes = owner_boxes+[item['bbox'] for item in detection.faces if item['identity']!='other']
@@ -593,17 +619,66 @@ class CameraWorker(threading.Thread):
                 if enrollment:enrollment.update(frame,detection.faces,time.monotonic())
                 if self.stop_event.is_set():
                     break
+                if time.monotonic()-captured_at>MAX_FRAME_AGE:
+                    self.publish(error='检测耗时较长，正在处理最新画面；可关闭其他高负载程序。')
+                    continue
                 self.publish(frame=frame, detection=detection, ready=True, identity_ready=bool(tracker.samples),
                              identity_version=identity_version,owner_boxes=owner_boxes,
                              private_boxes=private_boxes,
                              enrollment_status=enrollment.status() if enrollment else {},
-                             enrollment_samples=enrollment.samples if enrollment and enrollment.status()['done'] else [])
+                             enrollment_samples=enrollment.samples if enrollment and enrollment.status()['done'] else [],captured_at=captured_at)
+                self.set_phase('监测中')
                 self.stop_event.wait(max(0.0, 1 / 6 - (time.monotonic() - started)))
         except Exception as exc:
             self.publish(error=str(exc) or "相机发生未知错误。")
         finally:
-            if capture is not None:
+            if self.reader is not None:
+                self.stop_event.set()
+                # Only the capture thread owns/release()s the device. Never
+                # release it from Tk while a native read is still in flight.
+                self.reader.join()
+            elif capture is not None:
                 capture.release()
+            self.set_phase('相机已关闭')
+
+
+class LatestCameraFrames(threading.Thread):
+    """Continuously drain the driver; overwrite one slot instead of queuing lag."""
+    def __init__(self,capture,stop_event):
+        super().__init__(daemon=True,name='LocalCameraFrames')
+        self.capture=capture;self.stop_event=stop_event
+        self.condition=threading.Condition();self.snapshot=None;self.error=''
+
+    def latest(self):
+        with self.condition:return self.snapshot
+
+    def take(self,after,timeout):
+        with self.condition:
+            self.condition.wait_for(lambda:self.stop_event.is_set() or self.error or
+                self.snapshot is not None and self.snapshot[0]>after,timeout)
+            return self.snapshot if self.snapshot is not None and self.snapshot[0]>after else None
+
+    def run(self):
+        serial=0;failures=0
+        try:
+            while not self.stop_event.is_set():
+                okay,frame=self.capture.read()
+                if self.stop_event.is_set():break
+                if not okay or frame is None:
+                    failures+=1
+                    if failures>=5:raise RuntimeError('相机画面已中断，请暂停后重新开启。')
+                    self.stop_event.wait(.1);continue
+                failures=0;serial+=1
+                with self.condition:
+                    self.snapshot=(serial,time.monotonic(),frame)
+                    self.condition.notify_all()
+        except Exception as exc:
+            with self.condition:self.error=str(exc) or '读取相机失败';self.condition.notify_all()
+        finally:
+            self.capture.release()
+            with self.condition:
+                self.snapshot=None
+                self.condition.notify_all()
 
 
 def enable_dpi_awareness():
