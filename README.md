@@ -13,6 +13,12 @@
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
+![窥贼 v11 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v11.0.0-beta.1/Crazy-v11-Beta-UI.png)
+
+## 下载
+
+Windows 用户可以前往 [v11 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v11.0.0-beta.1)，下载 `Crazy-v11-Beta-Windows.zip`，解压后运行 `Crazy-v11-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+
 ## 使用体验
 
 - 灰白底色、低饱和绿、可见的键盘焦点与高 DPI 控件。
