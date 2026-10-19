@@ -5,7 +5,7 @@
 [![Windows checks](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml/badge.svg)](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-52745B.svg)](LICENSE)
 ![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-52745B.svg)
-![Status: Beta](https://img.shields.io/badge/Status-v11%20Beta-777777.svg)
+![Status: Beta](https://img.shields.io/badge/Status-v12%20Beta-777777.svg)
 
 ## 忍了很久，最后还是打开了编辑器
 
@@ -98,15 +98,23 @@ TA还在看。
 
 一个在 Windows 本机运行的屏幕哨兵：检测后方观察者、尝试排除本人，按需遮挡指定窗口，并用动态相框提醒围观者。
 
-> v11 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
+> v12 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
-![窥贼 v11 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v11.0.0-beta.1/Crazy-v11-Beta-UI.png?preview=1)
+![窥贼 v12 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v12.0.0-beta.1/Crazy-v12-Beta-UI.png?preview=1)
 
 ## 下载
 
-Windows 用户可以前往 [v11 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v11.0.0-beta.1)，下载 `Crazy-v11-Beta-Windows.zip`，解压后运行 `Crazy-v11-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+Windows 用户可以前往 [v12 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v12.0.0-beta.1)，下载 `Crazy-v12-Beta-Windows.zip`，解压后运行 `Crazy-v12-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+
+## v12 的检测与指引改进
+
+- 高灵敏度检测到的脸会进入身份核对，避免被后续更高的隐藏门槛直接跳过。
+- 身份待确认时可先遮挡内容；特写和录像继续要求确认非本人。
+- 预览分别显示本人、非本人、待确认数量，并说明未触发原因。
+- 圆环只随实际采集进度填充；新模板验证成功并保存后才替换旧模板。取消时保留原模板。
+- 朝向筛选容忍短暂漏帧，明显转开时停止显示；它仍然不是精确眼动追踪。
 
 ## 使用体验
 
@@ -129,7 +137,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python small_mirror.py
 ```
 
-先点“认识我”，再用“相机预览”设置后方检测区；选择保护窗口，点“试遮挡”确认覆盖成功后，再开始保护。
+先点“认识我”：确认画面里是你，跟着圆环按提示转头，完成后验证并点“保存并完成”。随后用“相机预览”设置后方检测区；选择保护窗口，点“试遮挡”确认覆盖成功后，再开始保护。
 
 双击遮罩或按 `Ctrl+Alt+H` 恢复内容。窗口绑定只在当前会话有效，重启后需要重新选择。
 
@@ -149,12 +157,12 @@ py -3.12 -m venv .venv
 
 本人特征使用 Windows DPAPI 加密。录像是本地普通 AVI 文件，没有额外加密；当前 Windows 账户或有相应磁盘权限的程序可能读取它。见 [隐私说明](PRIVACY.md)。
 
-Windows 发行程序为 `Crazy-v11-Beta.exe`。
+Windows 发行程序为 `Crazy-v12-Beta.exe`。
 
 ## 检查与构建
 
 ```powershell
-.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media
+.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media tests_small_mirror_reliability
 .\.venv\Scripts\python small_mirror.py --self-test
 .\.venv\Scripts\python -m pip install pyinstaller==6.22.3
 .\.venv\Scripts\python tools/build_windows.py
@@ -215,3 +223,5 @@ Windows 发行程序为 `Crazy-v11-Beta.exe`。
 **为什么看不到人物动图？** 公开版默认显示原创哨兵。可在设置中导入有权使用的本地 GIF，具体文件名见上表。
 
 **支持 macOS / Linux 吗？** 当前界面和保护窗口依赖 Windows 原生 API，尚未支持其他平台。
+
+身份比对阈值参考 [OpenCV 的 SFace 示例](https://docs.opencv.org/4.12.0/d0/dd4/tutorial_dnn_face.html)，本人排除使用更严格的门槛。公开基准阈值不代表实际工位识别准确率。

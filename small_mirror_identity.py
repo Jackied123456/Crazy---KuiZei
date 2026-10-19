@@ -16,7 +16,9 @@ import numpy as np
 
 MODEL = 'face_recognition_sface_2021dec.onnx'
 OWNER_SCORE = .50
-OTHER_SCORE = .30
+# OpenCV's SFace example uses .363 on LFW. Keep a separate, stricter owner
+# threshold: ambiguous matches can cover content, but are never projected.
+OTHER_SCORE = .363
 VERIFY_INTERVAL = .5
 TRACK_TTL = .8
 POSES = ('正面看镜头', '轻轻向左转头', '轻轻向右转头', '稍微低头')
@@ -127,18 +129,32 @@ class SFace:
 
     def feature(self, frame, candidate):
         row = candidate.get('row')
-        if row is None or min(candidate['bbox'][2:]) < 24 or candidate.get('confidence',0)<.65:
-            return None
+        candidate['identity_hint']=''
+        if row is None or len(row)<15 or not np.isfinite(row).all():
+            candidate['identity_hint']='脸部关键点没看清';return None
+        if min(candidate['bbox'][2:]) < 24:
+            candidate['identity_hint']='脸太小，靠近一点或提高相机分辨率';return None
+        # Do not silently undo the high-sensitivity detector's .55 threshold.
+        if candidate.get('confidence',0)<.55:
+            candidate['identity_hint']='人脸还没看清';return None
         x,y,w,h=candidate['bbox']
-        gray=self.cv2.cvtColor(frame[y:y+h,x:x+w],self.cv2.COLOR_BGR2GRAY)
-        if not 15<float(gray.mean())<245 or self.cv2.Laplacian(gray,self.cv2.CV_64F).var()<15:
-            return None
-        aligned = self.engine.alignCrop(frame, np.asarray(row, dtype=np.float32))
-        return unit_feature(self.engine.feature(aligned))
+        crop=frame[max(0,y):min(frame.shape[0],y+h),max(0,x):min(frame.shape[1],x+w)]
+        if not crop.size:
+            candidate['identity_hint']='整张脸还没进入画面';return None
+        gray=self.cv2.cvtColor(crop,self.cv2.COLOR_BGR2GRAY)
+        if not 15<float(gray.mean())<245:
+            candidate['identity_hint']='脸上太暗或太亮，调整一下光线';return None
+        if self.cv2.Laplacian(gray,self.cv2.CV_64F).var()<15:
+            candidate['identity_hint']='画面有点糊，稍微稳一下';return None
+        try:
+            aligned = self.engine.alignCrop(frame, np.asarray(row, dtype=np.float32))
+            return unit_feature(self.engine.feature(aligned))
+        except (self.cv2.error,ValueError):
+            candidate['identity_hint']='这张脸暂时没核对好';return None
 
     def enrollment_feature(self, frame, candidate):
         x,y,w,h = candidate['bbox']
-        if min(w,h) < 80 or candidate.get('confidence',0) < .8:
+        if min(w,h) < 64 or candidate.get('confidence',0) < .8:
             return None, '离镜头近一点，让整张脸露出来'
         crop = frame[y:y+h,x:x+w]
         gray = self.cv2.cvtColor(crop, self.cv2.COLOR_BGR2GRAY)
@@ -268,6 +284,8 @@ class Enrollment:
         self.automatic=automatic
         self.baseline=None
         self.front_poses=[]
+        self.last_seen=None
+        self.last_bbox=None
 
     def capture(self):
         self.capturing = True
@@ -298,9 +316,24 @@ class Enrollment:
 
     def update(self, frame, faces, now):
         item = next((item for item in faces if item.get('track_id')==self.track_id),None)
+        # A brief YuNet miss may assign the same person a new track number.
+        # Reattach only with unique biometric evidence, never by position alone.
+        if (item is None and self.samples and self.last_seen is not None
+                and now-self.last_seen<=2. and self.last_bbox is not None):
+            matches=[]
+            for candidate in faces:
+                if 'bbox' not in candidate:continue
+                feature,error=self.recognizer.enrollment_feature(frame,candidate)
+                if feature is not None:
+                    score=similarity(feature,self.samples)
+                    if score>=OWNER_SCORE:matches.append((score,candidate))
+            matches.sort(key=lambda pair:pair[0],reverse=True)
+            if matches and (len(matches)==1 or matches[0][0]-matches[1][0]>=.10):
+                item=matches[0][1];self.track_id=item['track_id']
         if item is None:
-            self.message = '没跟上你，点“重新选我”再来一次'
+            self.message = '没跟上你，先回到圆环里；仍没认出时点“重新选我”'
             return
+        self.last_seen=now;self.last_bbox=item.get('bbox')
         if not self.capturing or self.stage>=len(POSES) or now-self.last_sample<.3:
             return
         feature, error = self.recognizer.enrollment_feature(frame,item)
@@ -320,5 +353,5 @@ class Enrollment:
     def status(self):
         done = self.stage>=len(POSES)
         return dict(stage=self.stage,count=len(self.samples),capturing=self.capturing,done=done,
-                    message=self.message or ('拍好了，点“保存并试一下”' if done else
+                    message=self.message or ('拍好了，下一步验证一下' if done else
                         ('看着镜头，稳住一下','往左转一点 ←','往右转一点 →','下巴往下收一点 ↓')[self.stage]))

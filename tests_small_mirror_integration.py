@@ -288,26 +288,33 @@ class Tests(unittest.TestCase):
         obj.enrolling=True;obj.enroll_selected=True
         return obj
 
-    def test_completed_enrollment_saved_and_sent_to_worker(self):
-        obj=self.enrollment_app();obj.finish_enrollment()
+    def test_completed_enrollment_verified_before_saved_and_sent_to_worker(self):
+        obj=self.enrollment_app();old=obj.owner_samples;obj.finish_enrollment()
+        obj.owner_store.save.assert_not_called()
+        self.assertIs(obj.owner_samples,old)
+        self.assertTrue(obj.owner_verifying)
+        self.assertEqual(len(obj.pending_owner_samples),12)
+        obj.owner_verified=True;obj.save_verified_owner()
         obj.owner_store.save.assert_called_once()
         self.assertEqual(len(obj.owner_samples),12)
         self.assertFalse(obj.enrolling)
-        self.assertEqual(obj.worker.calls[-1][1][0],'templates')
+        self.assertIn('templates',[call[1][0] for call in obj.worker.calls])
         self.assertEqual(obj.stats.total,0)
 
     def test_memory_only_enrollment_removes_previous_saved_template(self):
         obj=self.enrollment_app();obj.remember_owner.set(False);obj.finish_enrollment()
+        obj.owner_store.delete.assert_not_called()
+        obj.owner_verified=True;obj.save_verified_owner()
         obj.owner_store.save.assert_not_called();obj.owner_store.delete.assert_called_once()
         self.assertEqual(len(obj.owner_samples),12)
 
     def test_failed_save_keeps_enrollment_and_previous_memory_template(self):
         obj=self.enrollment_app();old=obj.owner_samples
         obj.owner_store.save.side_effect=OSError('injected write failure')
-        obj.finish_enrollment()
+        obj.finish_enrollment();obj.owner_verified=True;obj.save_verified_owner()
         self.assertIs(obj.owner_samples,old)
-        self.assertTrue(obj.enrolling)
-        self.assertFalse(obj.worker.calls)
+        self.assertTrue(obj.owner_verifying)
+        self.assertIsNotNone(obj.pending_owner_samples)
 
     def test_cancel_keeps_existing_profile(self):
         obj=self.enrollment_app();old=obj.owner_samples
@@ -315,6 +322,43 @@ class Tests(unittest.TestCase):
         self.assertIs(obj.owner_samples,old)
         obj.owner_store.delete.assert_not_called()
         self.assertFalse(obj.enrolling)
+
+    def test_cancel_during_verification_restores_previous_worker_template(self):
+        obj=self.enrollment_app();old=obj.owner_samples;obj.finish_enrollment()
+        obj.cancel_enrollment()
+        self.assertIs(obj.owner_samples,old)
+        self.assertEqual(obj.worker.calls[-2][1][0],'templates')
+        self.assertIs(obj.worker.calls[-2][1][1],old)
+        obj.owner_store.save.assert_not_called();obj.owner_store.delete.assert_not_called()
+
+    def test_starting_enrollment_keeps_existing_content_cover(self):
+        obj=self.enrollment_app();obj.mask_active=True;obj.auto_mask=True
+        mask=Resource();obj.masks=[mask];obj.finish_selection=lambda:None
+        obj.begin_enrollment()
+        self.assertTrue(obj.mask_active and obj.auto_mask)
+        self.assertFalse(mask.closed)
+
+    def test_restoring_off_camera_after_enrollment_does_not_remove_existing_cover(self):
+        obj=self.enrollment_app();obj.owner_camera_was_paused=True
+        obj.mask_active=True;mask=Resource();obj.masks=[mask]
+        obj.cancel_enrollment()
+        self.assertTrue(obj.paused and obj.worker.stopped and obj.mask_active)
+        self.assertFalse(mask.closed)
+
+    def test_verification_needs_fresh_owner_detections_and_cannot_be_skipped(self):
+        obj=self.enrollment_app();obj.owner_window=Value();obj.render_owner_preview=lambda packet:None
+        obj.finish_enrollment();obj.save_verified_owner();obj.owner_store.save.assert_not_called()
+        packet=self.core.FacePacket(serial=1,ready=True,faces=[{'identity':'owner','track_id':7}])
+        for now in (0,.4,.9):
+            with patch.object(self.app.time,'monotonic',return_value=now):obj.update_enrollment(packet)
+        self.assertFalse(obj.owner_verified)
+        for serial,now in ((2,1),(3,1.2)):
+            packet.serial=serial
+            with patch.object(self.app.time,'monotonic',return_value=now):obj.update_enrollment(packet)
+        self.assertTrue(obj.owner_verified)
+        packet.faces=[]
+        obj.update_enrollment(packet)
+        self.assertFalse(obj.owner_verified)
 
     def test_delete_clears_memory_and_worker_profile_and_stops_display(self):
         obj=self.enrollment_app();obj.enrolling=False
@@ -540,6 +584,31 @@ class Tests(unittest.TestCase):
         packet=self.observer_packet(1,0)
         for now in (0,.6,1.2,3):self.assertFalse(obj.observe_packet(packet,now))
         self.assertEqual(obj.stats.total,0)
+
+    def test_uncertain_detected_presence_covers_without_projecting_or_counting(self):
+        obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
+        obj.has_protection=lambda:True;obj.show_mask=MagicMock()
+        obj.record_enabled.set(True);obj.recorder.feed=MagicMock()
+        for serial,now in ((1,0),(2,.17),(3,.34)):
+            packet=self.observer_packet(serial,now);packet.face=None
+            packet.faces[0].update(identity='uncertain',accepted=False,detection_accepted=True)
+            shown=obj.observe_packet(packet,now)
+            obj.process_protection(packet,now);obj.process_recording(packet,now,shown)
+            self.assertFalse(shown)
+        obj.show_mask.assert_called_once_with(automatic=True)
+        self.assertTrue(all(call.args[0] is None for call in obj.recorder.feed.call_args_list))
+        self.assertEqual(obj.stats.total,0)
+
+    def test_owner_only_presence_never_covers_or_projects(self):
+        obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
+        obj.has_protection=lambda:True;obj.show_mask=MagicMock()
+        for serial,now in ((1,0),(2,.34),(3,1.1)):
+            packet=self.observer_packet(serial,now);packet.face=None
+            packet.faces[0].update(identity='owner',accepted=False,detection_accepted=True)
+            packet.owner_boxes=[packet.faces[0]['bbox']]
+            obj.process_protection(packet,now)
+            self.assertFalse(obj.observe_packet(packet,now))
+        obj.show_mask.assert_not_called();self.assertEqual(obj.stats.total,0)
 
     def test_automatic_cover_rearms_after_restore_before_two_second_visit_gap(self):
         obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)

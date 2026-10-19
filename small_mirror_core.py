@@ -269,7 +269,7 @@ def _interpret_faces(rows, width, height, rois, sensitivity="高", scale_x=1.0, 
         for coordinate in range(4,14):
             mapped[coordinate] *= scale_x if coordinate%2==0 else scale_y
         candidate = {"bbox": bbox, "confidence": score, "accepted": good, "row": mapped,
-                     "region_index": region, "excluded": excluded}
+                     "region_index": region, "excluded": excluded,"detection_accepted":good}
         result.faces.append(candidate)
         if good:
             accepted.append(candidate)
@@ -279,6 +279,46 @@ def _interpret_faces(rows, width, height, rois, sensitivity="高", scale_x=1.0, 
         result.region_index = selected["region_index"]
         result.roi = normalized[result.region_index]
     return result
+
+
+def classify_faces(detection, rois, enrolled, enrolling=False, preferred_track=None):
+    """Keep protective presence distinct from permission to display a face."""
+    eligible=[]
+    for item in detection.faces:
+        detected=item.get('detection_accepted',item.get('accepted',False))
+        item['detection_accepted']=detected
+        role=item.get('identity','uncertain')
+        item['protection_candidate']=bool(detected and role!='owner' and enrolled and not enrolling)
+        item['accepted']=bool(detected and role=='other' and enrolled and not enrolling)
+        if role=='owner':reason='本人 · 已排除'
+        elif item.get('region_index') is None:reason='检测区外 · 把检测框画大一些'
+        elif not detected:reason='人脸没看清 · 调整光线或灵敏度'
+        elif not enrolled:reason='先点“认识我”录入本人'
+        elif enrolling:reason='录入中 · 暂停回敬'
+        elif role=='other':reason='非本人 · 已检测到'
+        else:reason=item.get('identity_hint') or '身份待确认 · 先保护内容，暂不投射'
+        item['reason']=reason
+        if item['accepted']:eligible.append(item)
+    selected=next((item for item in eligible if preferred_track is not None
+                   and item.get('track_id')==preferred_track),None)
+    if selected is None:
+        selected=max(eligible,key=lambda item:item['bbox'][2]*item['bbox'][3],default=None)
+    detection.face=selected['bbox'] if selected else None
+    detection.region_index=selected['region_index'] if selected else None
+    detection.roi=rois[detection.region_index] if selected else None
+    return detection
+
+
+def detection_summary(packet,rois):
+    if packet.frame is None:return '等待相机画面',[]
+    height,width=packet.frame.shape[:2]
+    inside=[item for item in packet.faces
+        if matching_region(item['bbox'],width,height,rois) is not None
+        and item.get('confidence',1.)>=.55]
+    owners=sum(item.get('identity')=='owner' for item in inside)
+    others=sum(item.get('identity')=='other' for item in inside)
+    uncertain=len(inside)-owners-others
+    return f'区域内 {len(inside)} 张脸 · 本人 {owners} · 非本人 {others} · 待确认 {uncertain}',inside
 
 
 class YuNetDetector:
@@ -398,6 +438,7 @@ class CameraWorker(threading.Thread):
             recognizer = SFace(cv2)
             tracker = OwnerTracker(recognizer,self.owner_samples)
             enrollment = None
+            selected_track=None
             identity_version = 0
             if self.stop_event.is_set():
                 return
@@ -448,15 +489,9 @@ class CameraWorker(threading.Thread):
                 tracker.update(frame,detection.faces,time.monotonic())
                 owner_boxes = tracker.owner_boxes(time.monotonic())
                 private_boxes = owner_boxes+[item['bbox'] for item in detection.faces if item['identity']!='other']
-                eligible = []
-                for item in detection.faces:
-                    item['accepted'] = bool(item['accepted'] and item['identity']=='other'
-                                            and tracker.samples and enrollment is None)
-                    if item['accepted']:eligible.append(item)
-                selected = max(eligible,key=lambda item:item['bbox'][2]*item['bbox'][3],default=None)
-                detection.face = selected['bbox'] if selected else None
-                detection.region_index = selected['region_index'] if selected else None
-                detection.roi = rois[detection.region_index] if selected else None
+                classify_faces(detection,rois,bool(tracker.samples),enrollment is not None,selected_track)
+                chosen=next((item for item in detection.faces if item['bbox']==detection.face),None)
+                if chosen:selected_track=chosen.get('track_id')
                 if enrollment:enrollment.update(frame,detection.faces,time.monotonic())
                 if self.stop_event.is_set():
                     break

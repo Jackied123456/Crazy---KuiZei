@@ -24,7 +24,7 @@ from event_stats_v4 import EventSessionGate, StatsStore, StatsDataError
 from small_mirror_shell import NativeTray, GlobalHotkey, configure_floating_window
 from small_mirror_identity import OwnerStore, POSES
 from small_mirror_effects import EFFECTS,deform,draw_bugs
-from small_mirror_attention import facing_screen
+from small_mirror_attention import facing_screen, FacingTimer
 from small_mirror_recording import EventRecorder
 from small_mirror_panels import WindowPicker,RecordingsPanel
 from small_mirror_performer import (PerformerFrameRenderer, MOTIONS, PHRASES, DEFAULT_MOTIONS,
@@ -136,6 +136,10 @@ class PrivacyApp:
         self.owner_candidate=None;self.owner_verifying=False
         self.enrolling = False
         self.enroll_selected = False
+        self.pending_owner_samples=None;self.owner_verified=False
+        self.owner_verification_since=None;self.owner_verification_serial=-1
+        self.owner_verification_hits=0;self.owner_verification_target=None
+        self.owner_camera_was_paused=False
         self.stats_error = ''
         try:
             self.stats = StatsStore(self.stats_path)
@@ -207,6 +211,7 @@ class PrivacyApp:
         self.record_indicator=tk.StringVar(value='')
         self.protection_summary=tk.StringVar(value='待开启 · 先认识你，再选择保护窗口')
         self.attention_since=None;self.attention_target=None;self.attention_hits=0;self.attention_serial=-1
+        self.facing_timer=FacingTimer()
         self.session_gate = self.new_session_gate()
         self.protection_gate=EventSessionGate(threshold=.3,min_hits=2)
         self.protection_serial=-1
@@ -526,18 +531,19 @@ class PrivacyApp:
             return
         # No fresh image is not evidence that an observer left. Keep an existing
         # automatic cover until valid camera frames establish an actual absence.
-        trustworthy=(packet.frame is not None and packet.ready and packet.identity_ready and not packet.error)
+        trustworthy=(packet.frame is not None and packet.ready and packet.identity_ready and not packet.error
+                     and not self.paused and not self.enrolling and not self.owner_verifying and bool(self.owner_samples))
         if not trustworthy:
             self.protection_absent_since=None
             return
-        if packet.face is None:
-            height,width=packet.frame.shape[:2]
-            if any(item.get('identity') in ('uncertain','unregistered')
-                   and core.matching_region(item['bbox'],width,height,self.rois) is not None
-                   for item in packet.faces):
-                self.protection_absent_since=None
-                return
         present=self.valid_observer(packet)
+        height,width=packet.frame.shape[:2]
+        # An uncertain identity is not absence. Cover content while verification
+        # catches up, but never use that face for a close-up or a recording.
+        present=present or any(item.get('identity') not in ('owner','unregistered')
+            and item.get('detection_accepted',item.get('protection_candidate',False))
+            and core.matching_region(item['bbox'],width,height,self.rois) is not None
+            for item in packet.faces)
         if present:self.protection_absent_since=None
         elif self.protection_absent_since is None:self.protection_absent_since=now
         if self.auto_mask and self.protection_absent_since is not None and now-self.protection_absent_since>=1.2:
@@ -668,38 +674,26 @@ class PrivacyApp:
     def open_owner_settings(self):
         if self.owner_window is not None and self.owner_window.winfo_exists():
             self.owner_window.lift();return
-        window=tk.Toplevel(self.root);self.owner_window=window
-        window.title(PRODUCT_TITLE+' · 认识我')
-        window.geometry(f'{round(700*self.ui_scale)}x{min(round(620*self.ui_scale),self.root.winfo_screenheight()-100)}')
-        window.configure(bg=self.BG);window.protocol('WM_DELETE_WINDOW',self.cancel_enrollment)
-        panel=ttk.Frame(window,padding=20);panel.pack(fill='both',expand=True)
-        self.owner_status=tk.StringVar(value='已经认识你了。想再录一次，也可以。' if self.owner_samples else '先认识一下你，之后就不会把你当成观察者。')
-        ttk.Label(panel,textvariable=self.owner_status,wraplength=640*self.ui_scale,font=('Microsoft YaHei UI',12)).pack(anchor='w',pady=(0,12))
-        self.owner_preview=tk.Canvas(panel,bg='#080d12',height=round(280*self.ui_scale),highlightthickness=0)
-        self.owner_preview.pack(fill='both',expand=True,pady=(0,12));self.owner_preview.bind('<Button-1>',self.owner_point)
-        self.owner_progress=ttk.Progressbar(panel,maximum=12);self.owner_progress.pack(fill='x',pady=(0,8))
-        ttk.Label(panel,text='看镜头 → 往左一点 → 往右一点 → 低头一点',foreground=self.MUTED).pack(anchor='w',pady=(0,12))
-        self.remember_owner=tk.BooleanVar(value=True)
-        ttk.Checkbutton(panel,text='记住我：只在这台电脑上加密保存',variable=self.remember_owner).pack(anchor='w',pady=(0,10))
-        ttk.Label(panel,text='跟着提示动一动，会自动拍好。这里不保存照片。',foreground=self.MUTED).pack(anchor='w',pady=(0,14))
-        row=ttk.Frame(panel);row.pack(fill='x')
-        self.enroll_button=ttk.Button(row,text='重新录入' if self.owner_samples else '开始录入',command=self.begin_enrollment)
-        self.enroll_button.pack(side='left',padx=(0,8))
-        self.delete_owner_button=ttk.Button(row,text='删除模板',command=self.delete_owner_template);self.delete_owner_button.pack(side='left',padx=(0,8))
-        self.retry_owner_button=ttk.Button(row,text='这一步重来',command=self.retry_enrollment,state='disabled');self.retry_owner_button.pack(side='left',padx=(0,8))
-        ttk.Button(row,text='关闭',command=self.cancel_enrollment).pack(side='right')
+        from small_mirror_onboarding import build_owner_window
+        build_owner_window(self)
 
     def begin_enrollment(self):
         if self.worker and self.worker.stop_event.is_set():
             self.owner_status.set('相机正在关闭，等一下再试。');return
         if self.paused:self.toggle_pause()
         if self.paused:return
+        if getattr(self,'pending_owner_samples',None) is not None:
+            self.worker.identity_command('templates',self.owner_samples)
+        self.pending_owner_samples=None;self.owner_verified=False
+        self.owner_verification_since=None;self.owner_verification_hits=0
         self.enrolling=True;self.enroll_selected=False;self.owner_candidate=None;self.owner_verifying=False
         self.worker.identity_command('cancel')
-        self.finish_selection();self.reset_observer();self.hide_bar(clear_deadline=True);self.restore()
+        self.finish_selection();self.reset_observer();self.hide_bar(clear_deadline=True)
         self.enroll_button.configure(text='等相机画面出来…',state='disabled')
         self.delete_owner_button.configure(state='disabled');self.retry_owner_button.configure(state='disabled')
         self.owner_status.set('看这里。画面出来后，确认框里是你。')
+        from small_mirror_onboarding import set_step
+        set_step(self,0,'只有你一人时直接确认；画面里有多人时，点一下你自己的脸。')
         self.detail_var.set('正在认识你，先暂停回敬和录像。')
 
     def owner_point(self,event):
@@ -719,6 +713,8 @@ class PrivacyApp:
         self.worker.identity_command('begin',{'track_id':self.owner_candidate,'auto':True})
         self.enroll_selected=True;self.enroll_button.configure(text='跟着提示动一动',state='disabled')
         self.retry_owner_button.configure(state='normal')
+        from small_mirror_onboarding import set_step
+        set_step(self,1,'跟着圆环旁的箭头慢慢转，不用转很大；看清后会自动进入下一步。')
 
     def retry_enrollment(self):
         if self.worker:self.worker.identity_command('retry')
@@ -729,7 +725,8 @@ class PrivacyApp:
         canvas.delete('all');width,height=max(1,canvas.winfo_width()),max(1,canvas.winfo_height())
         if packet.frame is None:
             self.owner_preview_map=None
-            canvas.create_text(width/2,height/2,text='点“开始录入”，相机画面会显示在这里。',fill=self.MUTED,width=max(100,width-30),font=('Microsoft YaHei UI',11));return
+            message=packet.error or ('正在打开摄像头…' if self.enrolling else '点“开始录入”，把整张脸露出来。')
+            canvas.create_text(width/2,height/2,text=message,fill=self.MUTED,width=max(100,width-30),font=('Microsoft YaHei UI',11));return
         fh,fw=packet.frame.shape[:2];dw,dh=core.fit_size(fw,fh,width,height);ox,oy=(width-dw)/2,(height-dh)/2
         self.owner_preview_map=ox,oy,dw,dh
         picture=core.Image.fromarray(core.cv2.cvtColor(packet.frame,core.cv2.COLOR_BGR2RGB))
@@ -741,15 +738,32 @@ class PrivacyApp:
         for item in packet.faces:
             selected=item['track_id']==self.owner_candidate or self.owner_verifying and item.get('identity')=='owner'
             x,y,w,h=item['bbox'];left=ox+(fw-x-w)*dw/fw;top=oy+y*dh/fh
-            canvas.create_rectangle(left,top,left+w*dw/fw,top+h*dh/fh,outline=self.ACCENT if selected else '#8796a2',width=3 if selected else 1)
+            if not self.enroll_selected and not self.owner_verifying:
+                canvas.create_rectangle(left,top,left+w*dw/fw,top+h*dh/fh,outline=self.ACCENT if selected else '#8796a2',width=3 if selected else 1)
+        from small_mirror_onboarding import draw_guide
+        draw_guide(self,packet,self.owner_preview_map)
 
     def update_enrollment(self,packet):
         if not self.owner_window or not self.owner_window.winfo_exists():return
         self.render_owner_preview(packet)
         if self.owner_verifying:
-            if packet.owner_boxes:
-                self.owner_status.set('认出来了！动动头，看看框是不是跟着你。')
-                self.enroll_button.configure(text='完成',state='normal',command=self.cancel_enrollment)
+            owners=[item for item in packet.faces if item.get('identity')=='owner']
+            now=time.monotonic()
+            if packet.error or not packet.ready or len(owners)!=1:
+                self.owner_verification_since=None;self.owner_verification_hits=0;self.owner_verified=False
+                self.owner_status.set(packet.error or '看一下镜头，让我确认确实认得你')
+                self.enroll_button.configure(text='等待验证',state='disabled')
+                return
+            target=owners[0].get('track_id')
+            if self.owner_verification_since is None or target!=self.owner_verification_target:
+                self.owner_verification_since=now;self.owner_verification_hits=0
+                self.owner_verification_target=target;self.owner_verification_serial=-1
+            if packet.serial!=self.owner_verification_serial:
+                self.owner_verification_hits+=1;self.owner_verification_serial=packet.serial
+            self.owner_verified=now-self.owner_verification_since>=.6 and self.owner_verification_hits>=3
+            self.owner_status.set('认出你了，可以保存了' if self.owner_verified else '正在核对，保持一下…')
+            self.enroll_button.configure(text='保存并完成' if self.owner_verified else '正在验证…',
+                state='normal' if self.owner_verified else 'disabled',command=self.save_verified_owner)
             return
         if not self.enrolling:return
         if packet.error:self.owner_status.set(packet.error);return
@@ -759,9 +773,9 @@ class PrivacyApp:
             self.enroll_button.configure(text='是我，开始',state='normal' if ready else 'disabled',command=self.confirm_owner);return
         status=packet.enrollment_status
         if not status:return
-        self.owner_progress['value']=status['count']
-        self.owner_status.set('拍好了！点“保存并试一下”。' if status['done'] else f'第 {status["stage"]+1}/4 步 · {status["message"]}')
-        self.enroll_button.configure(text='保存并试一下' if status['done'] else '跟着提示动一动',state='normal' if status['done'] else 'disabled',command=self.finish_enrollment)
+        self.owner_progress.configure(value=status['count'])
+        self.owner_status.set('四个角度都拍好了，接着验证一下' if status['done'] else f'第 {status["stage"]+1}/4 步 · {status["message"]}')
+        self.enroll_button.configure(text='下一步：验证' if status['done'] else '正在采集…',state='normal' if status['done'] else 'disabled',command=self.finish_enrollment)
         lost='没跟上' in status['message'] or '不像' in status['message']
         self.retry_owner_button.configure(text='重新选我' if lost else '这一步重来',command=self.begin_enrollment if lost else self.retry_enrollment)
 
@@ -773,24 +787,44 @@ class PrivacyApp:
         if not packet.enrollment_status.get('done') or len(packet.enrollment_samples)!=12:
             self.owner_status.set('还没拍完，或相机断开了。重新选一下自己再来。');return
         samples=[sample.copy() for sample in packet.enrollment_samples]
+        self.pending_owner_samples=samples
+        self.worker.identity_command('templates',samples)
+        self.enrolling=False;self.enroll_selected=False;self.owner_verifying=True;self.owner_verified=False
+        self.owner_verification_since=None;self.owner_verification_hits=0
+        self.owner_verification_serial=-1;self.owner_verification_target=None
+        self.reset_observer();self.hide_bar(clear_deadline=True)
+        self.owner_status.set('最后确认一下：正对镜头，轻轻动动头')
+        self.detail_var.set('正在验证新模板；旧模板尚未替换。')
+        self.enroll_button.configure(text='正在验证…',state='disabled')
+        self.retry_owner_button.configure(text='重新录入',state='normal',command=self.begin_enrollment)
+        self.delete_owner_button.configure(state='disabled')
+        from small_mirror_onboarding import set_step
+        set_step(self,2,'认出你后点“保存并完成”。取消或验证失败时，原来的模板仍保留。')
+
+    def save_verified_owner(self):
+        samples=getattr(self,'pending_owner_samples',None)
+        if not self.owner_verifying or not getattr(self,'owner_verified',False) or not samples:
+            self.owner_status.set('还没确认是你，先看一下镜头。');return
         try:
             if self.remember_owner.get():self.owner_store.save(samples)
             else:self.owner_store.delete()
         except (OSError,ValueError) as exc:
             self.owner_status.set('没保存好，旧模板还在：'+str(exc));return
-        self.owner_samples=samples;self.worker.identity_command('templates',samples)
-        self.enrolling=False;self.enroll_selected=False;self.owner_verifying=True
-        self.reset_observer();self.hide_bar(clear_deadline=True)
-        self.owner_status.set('记好了。动动头，看看能不能认出你。')
-        self.detail_var.set('本人已录入，完成验证后恢复保护。')
-        self.enroll_button.configure(text='正在认你…',state='disabled')
-        self.retry_owner_button.configure(state='disabled');self.delete_owner_button.configure(state='normal')
+        self.owner_samples=samples;self.pending_owner_samples=None;self.owner_error=''
+        self.owner_summary.set('本人：已录入')
+        self.detail_var.set('已经认识你了。选择保护窗口，点“试遮挡”，再开始保护。')
+        self.cancel_enrollment()
 
     def cancel_enrollment(self):
+        if self.worker and getattr(self,'pending_owner_samples',None) is not None:
+            self.worker.identity_command('templates',self.owner_samples)
+        self.pending_owner_samples=None;self.owner_verified=False
         if self.worker:self.worker.identity_command('cancel')
         self.enrolling=False;self.enroll_selected=False;self.owner_verifying=False;self.reset_observer()
         if self.owner_window:self.owner_window.destroy();self.owner_window=None
         self.owner_preview=None;self.owner_preview_image=None
+        if getattr(self,'owner_camera_was_paused',False) and not self.paused:
+            self.toggle_pause(keep_cover=True)
 
     def delete_owner_template(self):
         if not messagebox.askyesno('删除本人模板','删除本机模板？重新录入前会暂停自动监测。',parent=self.owner_window):return
@@ -848,14 +882,14 @@ class PrivacyApp:
         if self.tray:
             self.tray.update(self.paused, self.sensitive.get())
 
-    def toggle_pause(self):
+    def toggle_pause(self,keep_cover=False):
         if self.worker and self.worker.is_alive() and not self.worker.stop_event.is_set():
             self.paused = True
-            if self.enrolling:self.cancel_enrollment()
+            if self.enrolling or self.owner_verifying:self.cancel_enrollment()
             self.worker.stop()
             self.reset_observer()
             self.hide_bar(clear_deadline=True)
-            self.restore()
+            if not keep_cover:self.restore()
             self.camera_button.configure(text='正在关闭相机…', state='disabled')
             self.detail_var.set('正在关闭摄像头；关闭后可继续监测。')
             self.update_tray()
@@ -896,6 +930,7 @@ class PrivacyApp:
         self.observer_absent_since = None
         self.last_serial = -1
         self.attention_since=None;self.attention_target=None;self.attention_hits=0;self.attention_serial=-1
+        if hasattr(self,'facing_timer'):self.facing_timer.reset()
         self.protection_absent_since=None
         if hasattr(self,'protection_gate'):self.protection_gate.reset();self.protection_serial=-1
         if hasattr(self,'recorder'):self.recorder.finish()
@@ -914,19 +949,10 @@ class PrivacyApp:
             self.reset_observer()
             return False
         valid = self.valid_observer(packet)
-        if valid and self.attention_required.get():
-            candidate=next((item for item in packet.faces if item['bbox']==packet.face),None)
-            target=candidate.get('track_id') if candidate else None
-            if not facing_screen(candidate):
-                self.attention_since=None;self.attention_hits=0;self.attention_target=None;valid=False
-            else:
-                if target!=self.attention_target or self.attention_since is None:
-                    self.attention_target=target;self.attention_since=now;self.attention_hits=0;self.attention_serial=-1
-                if packet.serial!=self.attention_serial:
-                    self.attention_hits+=1;self.attention_serial=packet.serial
-                valid=now-self.attention_since>=1. and self.attention_hits>=3
-        elif not valid:
-            self.attention_since=None;self.attention_hits=0;self.attention_target=None
+        if self.attention_required.get():
+            if not hasattr(self,'facing_timer'):self.facing_timer=FacingTimer()
+            candidate=next((item for item in packet.faces if item['bbox']==packet.face),None) if valid else None
+            valid=self.facing_timer.update(now,packet.serial,candidate) and valid
         if valid:
             if (self.observer_absent_since is not None
                     and now-self.observer_absent_since >= self.session_gate.absence_seconds):
@@ -991,12 +1017,22 @@ class PrivacyApp:
             self.status_var.set('相机开启中' if not packet.error else '相机异常')
         elif self.enrolling:
             self.status_var.set('本人录入中')
+        elif self.owner_verifying:
+            self.status_var.set('本人验证中')
         elif not self.owner_samples:
             self.status_var.set('请先录入本人')
         elif not self.rois:
             self.status_var.set('请框选后方区域')
         else:
-            self.status_var.set('观察者入镜' if show_observer else '监测中')
+            _summary,inside=core.detection_summary(packet,self.rois)
+            if show_observer:status='观察者入镜'
+            elif packet.face is not None and self.attention_required.get():
+                candidate=next((item for item in packet.faces if item['bbox']==packet.face),None)
+                status='面朝屏幕 · 确认中' if facing_screen(candidate) else '检测到人 · 等待朝向'
+            elif any(item.get('identity')=='uncertain' for item in inside):status='身份待确认'
+            elif any(item.get('identity')=='owner' for item in inside):status='本人已排除 · 监测中'
+            else:status='监测中'
+            self.status_var.set(status)
         if self.root.state() == 'normal':
             if self.preview_enabled.get():self.render_preview(packet)
         if self.adjusting:
@@ -1122,19 +1158,22 @@ class PrivacyApp:
             selected = (item.get('accepted', False) and not owner
                         and core.matching_region(face, fw, fh, self.rois) is not None)
             accepted += int(selected)
-            if not self.debug.get() and not selected and not owner and not self.enrolling:
+            if not self.debug.get() and item.get('confidence',0)<.55 and not owner:
                 continue
-            color = self.ACCENT if owner else '#f5d77c' if selected else '#9aabba'
+            color = self.ACCENT if owner or selected else '#7A8178'
             canvas.create_rectangle(ox+x*dw/fw, oy+y*dh/fh, ox+(x+w)*dw/fw, oy+(y+h)*dh/fh,
                                     outline=color, width=2 if selected else 1)
-            if self.debug.get() or owner or self.enrolling:
-                text = '本人 · 已排除' if owner else '点击本人' if self.enrolling else f'人脸分数 {item.get("confidence",0):.2f}'
-                canvas.create_text(ox+x*dw/fw, oy+y*dh/fh-3, text=text,
-                                   fill=color, anchor='sw', font=('Microsoft YaHei UI', 8))
+            text = '本人 · 已排除' if owner else '点击本人' if self.enrolling else item.get('reason','身份待确认')
+            if selected and self.attention_required.get():
+                text='非本人 · 等待约 1 秒' if facing_screen(item) else '非本人 · 等待面朝屏幕'
+            if self.debug.get():text+=f' · 检测分数 {item.get("confidence",0):.2f}'
+            canvas.create_text(ox+x*dw/fw, max(oy+15,oy+y*dh/fh-3), text=text,
+                               fill=color, anchor='sw', font=('Microsoft YaHei UI', 8))
         for x,y,w,h in packet.owner_boxes:
             canvas.create_rectangle(ox+x*dw/fw,oy+y*dh/fh,ox+(x+w)*dw/fw,oy+(y+h)*dh/fh,
                                     outline=self.ACCENT,width=2,dash=(4,2))
-        self.detector_var.set(f'检测框 {len(self.rois)} 个 · 选区内人脸 {accepted} 张 · {getattr(packet,"capture_info", "") or str(fw)+"×"+str(fh)}')
+        summary,_inside=core.detection_summary(packet,self.rois)
+        self.detector_var.set(summary+'\n'+(getattr(packet,'capture_info','') or f'{fw}×{fh}'))
         if not self.rois:
             canvas.create_text(width / 2, 20, text='点击“检测区”，框选后方区域', fill=self.TEXT, font=('Microsoft YaHei UI', 10))
 
@@ -1697,10 +1736,25 @@ def main():
                 capture.release()
             recorder.last_saved.unlink()
             recorder.directory.rmdir()
+            # Exercise the packaged lazy wizard module with a synthetic camera
+            # frame. This must never start the real camera or save a template.
+            if app.tick_after is not None:
+                root.after_cancel(app.tick_after);app.tick_after=None
+            app.open_owner_settings()
+            root.update()
+            app.enrolling=True;app.enroll_selected=True;app.owner_candidate=7
+            synthetic=core.FacePacket(frame=np.full((180,320,3),120,dtype=np.uint8),ready=True,
+                faces=[dict(bbox=(140,50,50,60),track_id=7,identity='uncertain')],
+                enrollment_status=dict(stage=1,count=4,done=False,message='往左转一点 ←'))
+            app.update_enrollment(synthetic);root.update()
+            assert sum(app.owner_preview.type(item)=='arc' for item in app.owner_preview.find_all())==12,'Guidance ring did not draw 12 segments'
+            assert app.owner_progress['value']==4 and app.worker is None,'Guidance progress or camera state incorrect'
+            assert not app.owner_store.path.exists()
+            app.cancel_enrollment()
             if app.notices:
                 raise RuntimeError('；'.join(app.notices))
             app.close()
-            print('SMOKE-TEST PASS: UI, local animation preview, zero manual counts and synthetic clip encode/decode; camera remained off.')
+            print('SMOKE-TEST PASS: UI, guided enrollment ring, local animation preview, zero manual counts and synthetic clip encode/decode; camera remained off.')
         else:
             root.after(120, root.deiconify)
             root.mainloop()
