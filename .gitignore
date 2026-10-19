@@ -1,0 +1,38 @@
+# Local identity and application data must never enter the repository.
+owner-template.*
+settings.json
+statistics*.json
+recordings/
+*.avi
+*.mp4
+*.mov
+*.npz
+*.npy
+*.sqlite*
+*.db
+*.pkl
+*.pickle
+.env
+.env.*
+!.env.example
+# Local media is optional; the public default can use the original sentry.
+assets/yaoshui/*.gif
+assets/local/
+# Build products and machine-specific configuration
+__pycache__/
+*.py[cod]
+*.log
+.venv/
+venv/
+build/
+dist/
+*.spec
+*.exe
+*.zip
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+active-media.*
+media-packs/

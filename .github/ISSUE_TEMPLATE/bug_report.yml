@@ -1,0 +1,36 @@
+name: 问题反馈
+description: 报告可以复现的界面、检测或遮挡问题。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先阅读 README。不要上传真实人脸、模板、录像、凭据或工作内容。
+        安全漏洞请查看 SECURITY.md，不要公开利用细节。
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: v11 Beta，或提交编号
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与显示环境
+      placeholder: Windows 11 / 150% 缩放 / 单显示器
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 尽量使用空白窗口和独立测试数据目录。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期结果与实际结果
+    validations:
+      required: true

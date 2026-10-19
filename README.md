@@ -1,0 +1,122 @@
+# 窥贼 · Crazy
+
+**把背后交给我**
+
+[![Windows checks](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml/badge.svg)](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-52745B.svg)](LICENSE)
+![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-52745B.svg)
+![Status: Beta](https://img.shields.io/badge/Status-v11%20Beta-777777.svg)
+
+一个在 Windows 本机运行的屏幕哨兵：检测后方观察者、尝试排除本人，按需遮挡指定窗口，并用动态相框提醒围观者。
+
+> v11 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
+
+[快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
+
+## 使用体验
+
+- 灰白底色、低饱和绿、可见的键盘焦点与高 DPI 控件。
+- “认识我”、相机预览与保护窗口直接放在主页；动作预览放在设置里。
+- 支持多个检测区、多个保护区和应用窗口。窗口移动时，遮罩尝试跟随。
+- 本人模板在 Windows 当前账户下加密保存；运行时不上传图像，不下载模型。
+- 相机初始关闭。录像默认关闭，需要主动打开；只保存观察者原始特写，不录屏、不录声音。
+- 动画素材在后台准备，按需缩放。没有可选人物素材时，使用代码绘制的原创几何哨兵。
+
+## 运行
+
+需要 Windows 10/11、64 位 Python 3.12、摄像头。依赖安装需要网络，程序正常运行使用仓库内的本地模型。
+
+```powershell
+git clone https://github.com/Jackied123456/Crazy---KuiZei.git
+cd Crazy---KuiZei
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-small-mirror.txt
+.\.venv\Scripts\python small_mirror.py
+```
+
+先点“认识我”，再用“相机预览”设置后方检测区；选择保护窗口，点“试遮挡”确认覆盖成功后，再开始保护。
+
+双击遮罩或按 `Ctrl+Alt+H` 恢复内容。窗口绑定只在当前会话有效，重启后需要重新选择。
+
+## 限制
+
+头部朝向加持续时间只是近似筛选，不能证明对方在阅读屏幕，也不能证明对方有恶意。摄像头角度、光线、遮挡和侧脸都会影响结果。
+
+遮罩盖住同一块屏幕，也会遮住使用者看到的内容。它无法撤回已被看见的画面，不能代替物理防窥措施。全屏、高权限应用和不同显示缩放需要实测。
+
+只有覆盖位置、可见性和窗口层级检查成功后，界面才报告“已遮挡”。出现观察者相框不等于内容已经保护。程序退出或崩溃后不保证遮罩继续存在。
+
+这是 **Beta 测试版，当前仅供娱乐、未商业化**。这段说明不代替代码许可证或第三方素材授权。代码采用 MIT，允许商业使用；“未商业化”只说明本项目当前状态。
+
+## 本地数据
+
+默认目录为 `%LOCALAPPDATA%/Crazy/PublicBeta`。可以通过 `--data-dir` 指定独立目录。本源码仓库不包含已有模板、设置、录像或统计，不导入其他旧版应用的共享模板。
+
+本人特征使用 Windows DPAPI 加密。录像是本地普通 AVI 文件，没有额外加密；当前 Windows 账户或有相应磁盘权限的程序可能读取它。见 [隐私说明](PRIVACY.md)。
+
+Windows 发行程序为 `Crazy-v11-Beta.exe`。
+
+## 检查与构建
+
+```powershell
+.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media
+.\.venv\Scripts\python small_mirror.py --self-test
+.\.venv\Scripts\python -m pip install pyinstaller==6.22.3
+.\.venv\Scripts\python tools/build_windows.py
+```
+
+上述自动化检查不需要真实摄像头；图像和录像测试使用合成像素。没有可选 GIF 时，相应素材完整性检查会明确跳过，其余时序和原创哨兵检查仍会执行。
+
+[GitHub Actions](https://github.com/Jackied123456/Crazy---KuiZei/actions) 在推送和 Pull Request 时运行上述检查，页面顶部徽章显示当前状态。工作流使用固定提交的官方 Actions、只读仓库权限和普通 `pull_request` 触发器，不上传测试文件或用户数据。
+
+## 本地素材
+
+在“设置 → 动画与台词”选择“导入本地动图”，选择装有 GIF 的文件夹。可只准备部分动作；文件名与 slots 如下。
+
+| 文件名 | 用途 |
+| --- | --- |
+| `patrol.gif` | 开场巡逻 |
+| `close-warning.gif` | 近景提醒 |
+| `ear-laugh.gif` | 大笑 |
+| `arms-chin.gif` | 托腮观察 |
+| `frown.gif` | 皱眉 |
+| `salute-sleep.gif` | 敬礼收尾 |
+| `megaphone.gif` | 广播提醒 |
+| `black-straight.gif` | 单次回敬 |
+| `tiny-heart.gif` | 友好收尾 |
+| `tank-combo.gif` | 连招 |
+| `red-barrage.gif` | 连续回敬 |
+| `covered-giggle.gif` | 忍笑 |
+
+单个 GIF 最多 20 MB、300 帧、200 万像素；整组最多 60 MB，并限制解码后的总帧像素。文件内容在后台检查，只导入已知文件名，用户提供的节目配置不会被导入。导入内容保存在独立本地数据目录，公开构建始终不携带这些文件。“删除导入素材”恢复原创动画，不删除本人模板、设置和录像。只导入你有权使用的内容。
+
+## 素材与许可
+
+公开目录只保留原创程序绘制的默认动画和通用模型。YuNet 模型附带 MIT 许可，SFace 模型附带 Apache-2.0 许可；这些模型是通用权重，不是某个用户的人脸模板。
+
+人物 GIF 不属于本项目代码许可，不能因为网上可见就视作获准分发。可选本地素材目录被 `.gitignore` 排除；素材来源链接也不构成授权证明。
+
+代码与原创默认动画采用根目录 [MIT 许可证](LICENSE)。模型和依赖保留各自许可。发布检查会在缺少代码许可证、混入未审核素材、用户数据或常见凭据时失败。
+
+## 目录
+
+- `small_mirror*.py`：界面、识别、保护窗口、动态相框和录像。
+- `event_stats_v4.py`：连续事件去重与本地计数。
+- `models/`：本地模型和各自许可。
+- `assets/yaoshui/programs.json`：本应用编写的节目时序与文案，不包含第三方人物图像。
+- `tests_*.py`：合成输入和原生 API 模拟测试。
+- `tools/`：本机构建与发布检查。
+
+报告问题前请阅读 [安全说明](SECURITY.md) 和 [贡献说明](CONTRIBUTING.md)，不要提交真实人脸或工作内容。
+
+## 常见问题
+
+**运行时需要联网吗？** 安装 Python 依赖需要网络。模型随源码提供，应用的识别、遮挡和录像在本地进行；没有遥测或图像上传功能。
+
+**下载后就会开摄像头、开始录像吗？** 不会。初始相机关闭，录像也默认关闭。开启录像后只保存观察者的原始特写，不录制桌面或声音。
+
+**为什么本人也可能被框出来？** 请先完成“认识我”，并在实际工位光线下预览验证。本人排除与头部朝向筛选都可能误判，不能把提示当作窥屏行为的事实认定。
+
+**为什么看不到人物动图？** 公开版默认显示原创哨兵。可在设置中导入有权使用的本地 GIF，具体文件名见上表。
+
+**支持 macOS / Linux 吗？** 当前界面和保护窗口依赖 Windows 原生 API，尚未支持其他平台。

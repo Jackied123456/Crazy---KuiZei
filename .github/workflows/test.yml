@@ -1,0 +1,36 @@
+name: Synthetic Windows checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7, verified official tag
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7, verified official tag
+        with:
+          python-version: '3.12'
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements-small-mirror.txt
+      - name: Synthetic application regressions
+        run: python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media
+      - name: Camera-off models and compositor
+        run: python small_mirror.py --self-test
+      - name: Release gate regressions
+        run: python -m unittest discover -s tools -p test_publication_gate.py
+      - name: Source archive and publication gate
+        run: |
+          python tools/source_archive.py --output build/Crazy-source.zip
+          python tools/check_open_source.py build/Crazy-source.zip --report build/publication.json

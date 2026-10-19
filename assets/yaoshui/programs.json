@@ -1,0 +1,230 @@
+{
+  "patrol": {
+    "label": "后排巡逻",
+    "steps": [
+      {
+        "clip": "patrol",
+        "label": "左右巡逻",
+        "start_ms": 0,
+        "duration_ms": 2670,
+        "copies": {
+          "cheeky": "谁在后面？",
+          "guard": "后方有动静。",
+          "absurd": "目光雷达开机。"
+        }
+      },
+      {
+        "clip": "warning",
+        "label": "指镜头警告",
+        "start_ms": 0,
+        "duration_ms": 900,
+        "copies": {
+          "cheeky": "这位观众？",
+          "guard": "请收回目光。",
+          "absurd": "眼神请排队。"
+        }
+      },
+      {
+        "clip": "earlaugh",
+        "label": "贴耳大笑",
+        "start_ms": 0,
+        "duration_ms": 2500,
+        "copies": {
+          "cheeky": "哎，还真在看。",
+          "guard": "屏幕暂不开放。",
+          "absurd": "这也能看入迷？"
+        }
+      }
+    ]
+  },
+  "judge": {
+    "label": "冷脸劝退",
+    "steps": [
+      {
+        "clip": "arms",
+        "label": "抱臂托腮",
+        "start_ms": 0,
+        "duration_ms": 3600,
+        "copies": {
+          "cheeky": "看你半天了。",
+          "guard": "已发现观察者。",
+          "absurd": "审视你的审视。"
+        }
+      },
+      {
+        "clip": "frown",
+        "label": "皱眉打量",
+        "start_ms": 1000,
+        "duration_ms": 2400,
+        "copies": {
+          "cheeky": "眼神收收哈。",
+          "guard": "请留一点空间。",
+          "absurd": "目光超时啦。"
+        }
+      },
+      {
+        "clip": "salute",
+        "label": "敬礼收工",
+        "start_ms": 0,
+        "duration_ms": 2800,
+        "copies": {
+          "cheeky": "好，散会。",
+          "guard": "谢谢配合。",
+          "absurd": "退朝，退朝。"
+        }
+      }
+    ]
+  },
+  "punch": {
+    "label": "暴躁又客气",
+    "steps": [
+      {
+        "clip": "megaphone",
+        "label": "举起小喇叭",
+        "start_ms": 0,
+        "duration_ms": 1900,
+        "copies": {
+          "cheeky": "后排注意！",
+          "guard": "后排请注意。",
+          "absurd": "目光广播开始！"
+        }
+      },
+      {
+        "clip": "straight",
+        "label": "单次直拳",
+        "start_ms": 0,
+        "duration_ms": 1680,
+        "copies": {
+          "cheeky": "防窥拳，接好！",
+          "guard": "正在保护屏幕。",
+          "absurd": "发射空气拳！"
+        }
+      },
+      {
+        "clip": "heart",
+        "label": "突然比心",
+        "start_ms": 0,
+        "duration_ms": 1600,
+        "copies": {
+          "cheeky": "礼貌一下。",
+          "guard": "友好提醒完毕。",
+          "absurd": "拳后服务到位。"
+        }
+      }
+    ]
+  },
+  "combo": {
+    "label": "回敬小连招",
+    "steps": [
+      {
+        "clip": "warning",
+        "label": "指镜头警告",
+        "start_ms": 0,
+        "duration_ms": 900,
+        "copies": {
+          "cheeky": "还没看够？",
+          "guard": "屏幕正在使用。",
+          "absurd": "这眼神续费了？"
+        }
+      },
+      {
+        "clip": "combo",
+        "label": "背心组合拳",
+        "start_ms": 0,
+        "duration_ms": 2760,
+        "copies": {
+          "cheeky": "眼神收回去！",
+          "guard": "请勿围观屏幕。",
+          "absurd": "目光接招吧！"
+        }
+      },
+      {
+        "clip": "salute",
+        "label": "敬礼收工",
+        "start_ms": 0,
+        "duration_ms": 2800,
+        "copies": {
+          "cheeky": "本场结束。",
+          "guard": "感谢保持距离。",
+          "absurd": "本台收工啦。"
+        }
+      }
+    ]
+  },
+  "barrage": {
+    "label": "眼神劝退术",
+    "steps": [
+      {
+        "clip": "frown",
+        "label": "皱眉打量",
+        "start_ms": 1000,
+        "duration_ms": 2400,
+        "copies": {
+          "cheeky": "你又来啦？",
+          "guard": "发现持续围观。",
+          "absurd": "熟悉的目光。"
+        }
+      },
+      {
+        "clip": "barrage",
+        "label": "红衣连拳",
+        "start_ms": 0,
+        "duration_ms": 880,
+        "copies": {
+          "cheeky": "启动小连招！",
+          "guard": "屏幕保护中。",
+          "absurd": "空气拳连发！"
+        }
+      },
+      {
+        "clip": "laugh",
+        "label": "憋不住笑了",
+        "start_ms": 0,
+        "duration_ms": 3700,
+        "copies": {
+          "cheeky": "行了，别看啦。",
+          "guard": "请给屏幕空间。",
+          "absurd": "节目效果够了。"
+        }
+      }
+    ]
+  },
+  "encore": {
+    "label": "后排散场啦",
+    "steps": [
+      {
+        "clip": "arms",
+        "label": "抱臂托腮",
+        "start_ms": 0,
+        "duration_ms": 3600,
+        "copies": {
+          "cheeky": "这屏幕有票吗？",
+          "guard": "这块屏幕私人用。",
+          "absurd": "观众席在哪里？"
+        }
+      },
+      {
+        "clip": "megaphone",
+        "label": "举起小喇叭",
+        "start_ms": 0,
+        "duration_ms": 1900,
+        "copies": {
+          "cheeky": "散场啦各位！",
+          "guard": "请结束围观。",
+          "absurd": "眼神可以下班。"
+        }
+      },
+      {
+        "clip": "earlaugh",
+        "label": "贴耳大笑",
+        "start_ms": 0,
+        "duration_ms": 2500,
+        "copies": {
+          "cheeky": "谢谢配合哈。",
+          "guard": "提醒结束，谢谢。",
+          "absurd": "散会还送大笑。"
+        }
+      }
+    ]
+  }
+}
