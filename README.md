@@ -13,7 +13,7 @@
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
-![窥贼 v11 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v11.0.0-beta.1/Crazy-v11-Beta-UI.png)
+![窥贼 v11 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v11.0.0-beta.1/Crazy-v11-Beta-UI.png?preview=1)
 
 ## 下载
 
