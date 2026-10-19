@@ -585,6 +585,21 @@ class Tests(unittest.TestCase):
         for now in (0,.6,1.2,3):self.assertFalse(obj.observe_packet(packet,now))
         self.assertEqual(obj.stats.total,0)
 
+    def test_brief_display_grace_is_actor_only_and_never_survives_turn_or_pause(self):
+        obj=self.make_app();obj.frame_style.set('动态相框')
+        obj.observer_active=True;obj.last_reaction_at=10.;obj.performer_target=7
+        obj.attention_required.set(True)
+        missing=self.observer_packet(2,10.2,present=False)
+        self.assertTrue(obj.keep_performer_during_miss(missing,10.2))
+        self.assertFalse(obj.keep_performer_during_miss(missing,10.5))
+        obj.paused=True
+        self.assertFalse(obj.keep_performer_during_miss(missing,10.2))
+        obj.paused=False;away=self.observer_packet(3,10.2,target=7)
+        away.faces[0]['row'][8]=134
+        self.assertFalse(obj.keep_performer_during_miss(away,10.2))
+        away.faces[0]['identity']='owner'
+        self.assertFalse(obj.keep_performer_during_miss(away,10.2))
+
     def test_uncertain_detected_presence_covers_without_projecting_or_counting(self):
         obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
         obj.has_protection=lambda:True;obj.show_mask=MagicMock()

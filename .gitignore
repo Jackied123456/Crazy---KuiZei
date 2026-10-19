@@ -18,6 +18,7 @@ recordings/
 # Local media is optional; the public default can use the original sentry.
 assets/yaoshui/*.gif
 assets/local/
+Crazy-local-media/
 # Build products and machine-specific configuration
 __pycache__/
 *.py[cod]

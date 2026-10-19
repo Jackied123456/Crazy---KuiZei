@@ -1,6 +1,6 @@
 """Local YuNet camera core. No camera opens until CameraWorker.start().
 
-Detection runs on the complete frame; ROIs only filter detections afterwards.
+Detection covers the complete frame and bounded magnified rear-region tiles.
 Frames remain at their captured resolution. This module never saves images,
 downloads models, uploads data, or identifies a person.
 """
@@ -150,6 +150,29 @@ def redact_owner(frame, bounds, boxes):
     return redact_exclusions(frame,bounds,areas)
 
 
+def safe_observer_crop(frame, face, bounds, boxes):
+    """Withhold a colliding portrait instead of showing a partly blacked face.
+
+    Private heads still get the same generous redaction margin. The caller can
+    show its performer without a portrait when two heads cannot be separated.
+    """
+    x,y,w,h=face
+    left,top,right,bottom=bounds
+    for bx,by,bw,bh in boxes:
+        pl,pt,pr,pb=bx-.15*bw,by-.4*bh,bx+1.15*bw,by+1.15*bh
+        if min(right,pr)<=max(left,pl) or min(bottom,pb)<=max(top,pt):continue
+        # Tighten excess head padding when a private head is beside it. Keep
+        # the complete detected face, or withhold it if separation is impossible.
+        choices=[]
+        if pr<=x:choices.append((max(left,math.ceil(pr)),top,right,bottom))
+        if pl>=x+w:choices.append((left,top,min(right,math.floor(pl)),bottom))
+        if pb<=y:choices.append((left,max(top,math.ceil(pb)),right,bottom))
+        if pt>=y+h:choices.append((left,top,right,min(bottom,math.floor(pt))))
+        if not choices:return None
+        left,top,right,bottom=max(choices,key=lambda rect:(rect[2]-rect[0])*(rect[3]-rect[1]))
+    return frame[top:bottom,left:right].copy() if right>left and bottom>top else None
+
+
 def observer_crop(face, width, height, roi, eye_mode=False):
     """Expanded head/eye crop, strictly clipped to the already matched rear ROI."""
     bounds = pixel_roi(roi, width, height)
@@ -295,7 +318,8 @@ def classify_faces(detection, rois, enrolled, enrolling=False, preferred_track=N
         elif not detected:reason='人脸没看清 · 调整光线或灵敏度'
         elif not enrolled:reason='先点“认识我”录入本人'
         elif enrolling:reason='录入中 · 暂停回敬'
-        elif role=='other':reason='非本人 · 已检测到'
+        elif role=='other':reason=('另一张脸 · 本人已在画面中排除'
+                                  if item.get('identity_source')=='same-frame' else '非本人 · 已检测到')
         else:reason=item.get('identity_hint') or '身份待确认 · 先保护内容，暂不投射'
         item['reason']=reason
         if item['accepted']:eligible.append(item)
@@ -322,7 +346,11 @@ def detection_summary(packet,rois):
 
 
 class YuNetDetector:
-    """One complete-frame YuNet inference, followed by ROI/confidence filtering."""
+    """Full frame plus at most two zoom tiles; never digitally crop the preview.
+
+    Rotate one search tile per frame and revisit the last small-face tile. This
+    avoids losing a tiny face's track while searching the other rear regions.
+    """
 
     def __init__(self, model_path=None):
         if cv2 is None:
@@ -335,6 +363,43 @@ class YuNetDetector:
             raise RuntimeError(f"YuNet 本地模型无法加载：{exc}。程序不会回退旧检测器。") from exc
         if self.detector is None:
             raise RuntimeError("YuNet 本地检测器创建失败。程序不会回退旧检测器。")
+        self.zoom_cursor=0
+        self.focus_tile=None
+        self.focus_seen=-1e9
+
+    @staticmethod
+    def zoom_tiles(width,height,rois):
+        tiles=[]
+        for roi in normalize_rois(rois):
+            left,top,right,bottom=pixel_roi(roi,width,height)
+            tw,th=min(512,right-left),min(512,bottom-top)
+            if min(tw,th)<32:continue
+            columns=max(1,math.ceil((right-left-tw)/384)+1)
+            rows=max(1,math.ceil((bottom-top-th)/384)+1)
+            for iy in range(rows):
+                for ix in range(columns):
+                    x=left+round((right-left-tw)*ix/max(1,columns-1))
+                    y=top+round((bottom-top-th)*iy/max(1,rows-1))
+                    tile=(x,y,x+tw,y+th)
+                    if tile not in tiles:tiles.append(tile)
+                    if len(tiles)>=64:return tiles
+        return tiles
+
+    @staticmethod
+    def merge_rows(rows):
+        # NMS after mapping EVERY coordinate back to the captured frame. A
+        # duplicate uncertain detection must not redact a verified portrait.
+        selected=[]
+        for row in sorted(rows,key=lambda row:float(row[-1]),reverse=True):
+            x,y,w,h=row[:4]
+            duplicate=False
+            for other in selected:
+                bx,by,bw,bh=other[:4]
+                area=max(0,min(x+w,bx+bw)-max(x,bx))*max(0,min(y+h,by+bh)-max(y,by))
+                if area/max(1,w*h+bw*bh-area)>.30:
+                    duplicate=True;break
+            if not duplicate:selected.append(row)
+        return selected
 
     def detect(self, frame, rois, sensitivity="高", exclusions=None):
         sensitivity_threshold(sensitivity)
@@ -350,8 +415,41 @@ class YuNetDetector:
             _status, rows = self.detector.detect(detection_frame)
         except Exception as exc:
             raise RuntimeError(f"YuNet 本地检测失败：{exc}。请检查模型及运行环境。") from exc
-        return _interpret_faces(rows, width, height, rois, sensitivity,
-                                width / target_width, height / target_height, exclusions)
+        base=_interpret_faces(rows,width,height,rois,sensitivity,
+                              width/target_width,height/target_height,exclusions)
+        combined=[item['row'] for item in base.faces]
+        tiles=self.zoom_tiles(width,height,rois)
+        now=time.monotonic()
+        if tiles:
+            search=tiles[self.zoom_cursor%len(tiles)];self.zoom_cursor+=1
+            visits=[search]
+            if self.focus_tile in tiles and now-self.focus_seen<1.2 and self.focus_tile!=search:
+                visits.insert(0,self.focus_tile)
+            for left,top,right,bottom in visits:
+                tw,th=right-left,bottom-top
+                scale=min(2.,960/max(tw,th))
+                zw,zh=max(1,round(tw*scale)),max(1,round(th*scale))
+                zoom=cv2.resize(frame[top:bottom,left:right],(zw,zh),interpolation=cv2.INTER_LINEAR)
+                try:
+                    self.detector.setInputSize((zw,zh))
+                    _status,extra=self.detector.detect(zoom)
+                except Exception as exc:
+                    raise RuntimeError(f"后方区域补充检测失败：{exc}") from exc
+                for original in (() if extra is None else extra):
+                    row=[float(value) for value in original]
+                    row[0]=row[0]*tw/zw+left;row[1]=row[1]*th/zh+top
+                    row[2]*=tw/zw;row[3]*=th/zh
+                    for coordinate in range(4,14):
+                        row[coordinate]=row[coordinate]*(tw/zw if coordinate%2==0 else th/zh)+(left if coordinate%2==0 else top)
+                    # Ignore faces cut by a tile; the complete frame and
+                    # overlapping tiles provide the uncut candidate instead.
+                    if (original[0]<2 or original[1]<2 or original[0]+original[2]>zw-2
+                            or original[1]+original[3]>zh-2):continue
+                    combined.append(row)
+                    if (row[-1]>=sensitivity_threshold(sensitivity) and min(row[2:4])<64
+                            and matching_region(row[:4],width,height,rois) is not None):
+                        self.focus_tile=(left,top,right,bottom);self.focus_seen=now
+        return _interpret_faces(self.merge_rows(combined),width,height,rois,sensitivity,exclusions=exclusions)
 
 
 class CameraWorker(threading.Thread):

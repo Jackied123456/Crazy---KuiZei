@@ -18,7 +18,14 @@ def face_pose(row):
 
 def facing_screen(candidate):
     pose=face_pose(candidate.get('row') if candidate else None)
-    return pose is not None and abs(pose[0])<=.30 and .20<=pose[1]<=.90
+    if pose is None:return False
+    row=candidate['row']
+    eye_distance=math.hypot(float(row[6])-float(row[4]),float(row[7])-float(row[5]))
+    # One pixel of landmark error is a much larger angle on a distant face.
+    # Keep the near-face bound and add a capped one-pixel tolerance. A clear
+    # turn still fails; this remains approximate head direction, not eye gaze.
+    yaw_limit=.30+min(.15,1/max(4,eye_distance))
+    return abs(pose[0])<=yaw_limit and .20<=pose[1]<=.90
 
 
 class FacingTimer:

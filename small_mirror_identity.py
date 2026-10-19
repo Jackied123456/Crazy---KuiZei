@@ -207,6 +207,7 @@ class OwnerTracker:
         gray = self.predict_owner(frame,now)
         used = set()
         for item in faces:
+            item.pop('identity_source',None)
             bbox = item['bbox']
             choices = [(overlap(bbox,t['bbox']),key) for key,t in self.tracks.items()
                        if key not in used and nearby(t['bbox'],bbox)]
@@ -230,6 +231,7 @@ class OwnerTracker:
             crossing = any(other is not item and overlap(bbox,other['bbox'])>.12 for other in faces)
             needs_check = (not self.samples or ambiguous or crossing or changed or track['role']=='uncertain'
                            or track['role']=='owner' and now-track.get('owner_verified',-1e9)>=TRACK_TTL
+                           or track['role']=='other' and now-track.get('other_verified',-1e9)>=TRACK_TTL
                            or now-track['checked']>=VERIFY_INTERVAL)
             if needs_check:
                 feature = self.recognizer.feature(frame,item)
@@ -245,9 +247,13 @@ class OwnerTracker:
                 if (proposed=='uncertain' and track['role']=='owner' and not crossing and not ambiguous
                         and now-track.get('owner_verified',-1e9)<=TRACK_TTL):
                     pass  # Brief turn/blur bridges only a recently verified owner.
+                elif (feature is None and track['role']=='other' and not crossing and not ambiguous
+                        and not changed and now-track.get('other_verified',-1e9)<=TRACK_TTL):
+                    pass  # A single blurred frame must not restart the 1 s gate.
                 else:
                     track['role'] = proposed if track['hits']>=2 else 'uncertain'
                 if proposed=='owner' and track['role']=='owner':track['owner_verified']=now
+                if proposed=='other' and track['role']=='other':track['other_verified']=now
                 track['score'] = score
                 track['checked'] = now
             track['bbox'],track['seen'] = bbox,now
@@ -260,6 +266,21 @@ class OwnerTracker:
         if len(owners)>1:
             for item in owners:
                 item['identity']='uncertain';self.tracks[item['track_id']]['role']='uncertain'
+        elif len(owners)==1:
+            # Same-frame evidence: a distinct second face cannot be the one
+            # currently verified as owner. Do not require a distant small face
+            # to yield an SFace embedding. Never use a stale predicted owner
+            # box, an overlapping face, or an out-of-date identity for this.
+            ox,oy,ow,oh=owners[0]['bbox']
+            for item in faces:
+                if item['identity']!='uncertain' or item.get('confidence',0)<.55:continue
+                x,y,w,h=item['bbox']
+                if min(w,h)<12:continue
+                separate=(x+w<=ox-.10*ow or x>=ox+1.10*ow
+                          or y+h<=oy-.15*oh or y>=oy+1.15*oh)
+                if separate:
+                    item['identity']='other';item['identity_source']='same-frame'
+                    item['identity_hint']='本人在画面中 · 已发现另一张独立人脸'
         if gray is not None:
             cv = self.recognizer.cv2
             for track in self.tracks.values():

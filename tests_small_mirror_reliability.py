@@ -7,12 +7,64 @@ import cv2
 
 import small_mirror_core as core
 from small_mirror_identity import SFace,OwnerTracker,Enrollment
-from small_mirror_attention import FacingTimer,face_pose
+from small_mirror_attention import FacingTimer,face_pose,facing_screen
 from tests_small_mirror_identity import Recognizer,feature,face
 from tests_small_mirror_v7 import face as pose_face
 
 
 class RecognitionTests(unittest.TestCase):
+    def test_distant_face_can_use_a_distinct_current_owner_but_not_a_stale_box(self):
+        tracker=OwnerTracker(Recognizer(),[feature(0)]*3)
+        def distant():
+            return dict(bbox=(180,20,20,25),confidence=.9,test_feature=None)
+        for now in (0,.2):faces=tracker.update(None,[face(),distant()],now)
+        self.assertEqual([item['identity'] for item in faces],['owner','other'])
+        self.assertEqual(faces[1]['identity_source'],'same-frame')
+        # Owner left. A predicted/stale owner box is insufficient evidence.
+        item=tracker.update(None,[distant()],.4)[0]
+        self.assertEqual(item['identity'],'uncertain')
+        self.assertNotIn('identity_source',item)
+
+    def test_overlapping_unknown_face_cannot_use_owner_anchor(self):
+        tracker=OwnerTracker(Recognizer(),[feature(0)]*3)
+        tracker.update(None,[face()],0);tracker.update(None,[face()],.2)
+        unknown=face(90);unknown['test_feature']=None
+        faces=tracker.update(None,[face(),unknown],.4)
+        self.assertNotEqual(faces[1]['identity'],'other')
+
+    def test_brief_other_blur_does_not_restart_attention_but_expires(self):
+        tracker=OwnerTracker(Recognizer(),[feature(0)]*3)
+        tracker.update(None,[face(owner=False)],0)
+        tracker.update(None,[face(owner=False)],.2)
+        blurred=face(owner=False);blurred['test_feature']=None
+        self.assertEqual(tracker.update(None,[blurred],.71)[0]['identity'],'other')
+        self.assertEqual(tracker.update(None,[blurred],1.02)[0]['identity'],'uncertain')
+        # Contradicting positive owner evidence immediately revokes permission.
+        tracker.update(None,[face(owner=False)],2)
+        tracker.update(None,[face(owner=False)],2.2)
+        self.assertNotEqual(tracker.update(None,[face()],2.71)[0]['identity'],'other')
+
+    def test_colliding_private_margin_withholds_face_instead_of_partial_blackout(self):
+        frame=np.full((200,400,3),180,np.uint8)
+        target=(160,60,60,70)
+        self.assertIsNone(core.safe_observer_crop(frame,target,(140,20,240,150),[(105,80,50,50)]))
+        crop=core.safe_observer_crop(frame,target,(140,20,240,150),[(20,60,50,50)])
+        self.assertTrue(np.all(crop==180));self.assertTrue(np.all(frame==180))
+        # A neighboring head touches only crop padding. Trim the padding rather
+        # than painting a black strip or dropping an otherwise separable face.
+        crop=core.safe_observer_crop(frame,target,(140,20,240,150),[(100,80,45,50)])
+        self.assertIsNotNone(crop);self.assertTrue(np.all(crop==180))
+        self.assertLess(crop.shape[1],100)
+
+    def test_zoom_merge_suppresses_duplicate_faces_after_coordinate_mapping(self):
+        rows=[[100,80,30,40]+[0]*10+[.8],[101,81,31,39]+[0]*10+[.9],
+              [200,80,30,40]+[0]*10+[.85]]
+        merged=core.YuNetDetector.merge_rows(rows)
+        self.assertEqual(len(merged),2);self.assertEqual(merged[0][-1],.9)
+        tiles=core.YuNetDetector.zoom_tiles(1920,1080,[(0,0,1,1),(.7,0,1,.6)])
+        self.assertLessEqual(len(tiles),64)
+        self.assertTrue(all(0<=l<r<=1920 and 0<=t<b<=1080 and r-l<=512 and b-t<=512 for l,t,r,b in tiles))
+
     def test_high_sensitivity_face_is_not_discarded_by_a_second_hidden_threshold(self):
         recognizer=SFace.__new__(SFace);recognizer.cv2=cv2
         recognizer.engine=MagicMock()
@@ -68,6 +120,14 @@ class RecognitionTests(unittest.TestCase):
 
 
 class AttentionTests(unittest.TestCase):
+    def test_small_face_landmark_quantization_has_bounded_one_pixel_tolerance(self):
+        near=pose_face(.38)
+        self.assertFalse(facing_screen(near))
+        far=pose_face(.38);far['row'][:14]*=.25
+        self.assertTrue(facing_screen(far))
+        far=pose_face(.6);far['row'][:14]*=.25
+        self.assertFalse(facing_screen(far))
+
     def test_head_roll_does_not_turn_a_frontal_face_into_a_side_face(self):
         row=pose_face(.10,.6)['row'].copy()
         points=row[4:14].reshape(5,2)

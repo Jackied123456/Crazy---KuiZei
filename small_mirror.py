@@ -480,7 +480,7 @@ class PrivacyApp:
             self.detail_var.set('请等动图导入完成后再删除。');return
         if not messagebox.askyesno('删除导入素材','删除本应用导入的动图并恢复原创哨兵？本人模板、设置和录像不受影响。',parent=self.preferences_window or self.root):return
         try:
-            clear_packs(self.data_dir);forget_media_libraries(self.data_dir/'media-packs');self.reload_local_media()
+            clear_packs(self.data_dir,disable_portable=True);forget_media_libraries(self.data_dir/'media-packs');self.reload_local_media()
             self.detail_var.set('导入素材已删除，已恢复原创哨兵。')
         except (OSError,ValueError) as exc:self.detail_var.set('素材未能删除：'+str(exc))
 
@@ -495,7 +495,8 @@ class PrivacyApp:
         index=core.matching_region(packet.face,fw,fh,self.rois)
         if index is None:return None
         bounds=core.observer_crop(packet.face,fw,fh,self.rois[index],eye_mode=False)
-        return core.redact_owner(packet.frame,bounds,packet.private_boxes or packet.owner_boxes) if bounds else None
+        return core.safe_observer_crop(packet.frame,packet.face,bounds,
+                                      packet.private_boxes or packet.owner_boxes) if bounds else None
 
     def recording_changed(self):
         self.recorder.finish()
@@ -645,15 +646,29 @@ class PrivacyApp:
                 if bounds is None:
                     if self.window_api.target_visible(token):
                         self.coverage_expected+=1;self.coverage_errors.append('无法获取保护窗口的位置')
-                    elif mask:mask.withdraw()
+                    elif mask and mask.state()!='withdrawn':mask.withdraw()
                     continue
                 self.coverage_expected+=1
                 try:
                     if mask is None:
                         mask=self.make_mask(bounds,token);self.protected_masks[key]=mask
-                    else:mask.deiconify()
+                    elif mask.state()=='withdrawn':
+                        mask.deiconify()
+                        # Tk remaps a withdrawn native wrapper. Reapply its
+                        # overlay styles once, then cover() demotes and orders
+                        # it relative to the source before the next paint.
+                        configure_floating_window(mask,click_through=False,no_activate=True)
                     okay=self.window_api.cover(mask,token,bounds)
                     if okay:okay=self.window_api.verify_cover(mask,token,bounds)
+                    repair_state=(bounds,getattr(mask,'_cover_predecessor',None))
+                    if not okay and getattr(mask,'_repair_failed_state',None)!=repair_state:
+                        # A target may activate while Tk is remapping a wrapper.
+                        # Repair an observed failure once; never churn topmost
+                        # styles on every frame when protection cannot recover.
+                        configure_floating_window(mask,click_through=False,no_activate=True)
+                        okay=self.window_api.cover(mask,token,bounds)
+                        if okay:okay=self.window_api.verify_cover(mask,token,bounds)
+                        mask._repair_failed_state=None if okay else repair_state
                     if okay:self.coverage_checked+=1
                     else:self.coverage_errors.append('未能覆盖所选窗口，请试遮挡确认')
                     x,y,w,h=bounds;mask._bounds=bounds
@@ -1006,6 +1021,7 @@ class PrivacyApp:
             self.detail_var.set(packet.error)
         self.camera_fault=bool(packet.error or not self.paused and packet.frame is None)
         show_observer = self.observe_packet(packet, now)
+        if show_observer:self.last_reaction_at=now
         self.update_enrollment(packet)
         self.process_protection(packet,now)
         self.process_recording(packet,now,show_observer)
@@ -1039,6 +1055,8 @@ class PrivacyApp:
             self.show_bar(packet, force_placeholder=True)
         elif show_observer:
             self.show_bar(packet)
+        elif self.keep_performer_during_miss(packet,now):
+            self.show_bar(packet,force_placeholder=True,performer_only=True)
         elif self.demo_bar and now < self.bar_until:
             self.show_bar(packet, force_placeholder=True)
         else:
@@ -1117,14 +1135,19 @@ class PrivacyApp:
     def render_preview(self, packet):
         canvas = self.preview
         width, height = max(1, canvas.winfo_width()), max(1, canvas.winfo_height())
-        canvas.delete('all')
+        key=(packet.serial,id(packet.frame),packet.error,width,height,tuple(map(tuple,self.rois)),
+             self.drag_start,self.drag_end,self.debug.get(),self.enrolling,self.attention_required.get(),self.paused)
+        if key==getattr(self,'_preview_render_key',None):return
+        self._preview_render_key=key
+        canvas.delete('preview-overlay')
         if packet.frame is None:
+            canvas.delete('preview-frame')
             self.preview_image = self.preview_map = None
             message = packet.error or '相机关闭\n开启后，用鼠标框选后方观察区域。'
             if self.worker and not self.paused and not packet.error:
                 message = '正在开启相机…'
             canvas.create_text(width / 2, height / 2, text=message, fill=self.MUTED,
-                               width=max(200, width - 60), font=('Microsoft YaHei UI', 11), justify='center')
+                               width=max(200, width - 60), font=('Microsoft YaHei UI', 11), justify='center',tags='preview-overlay')
             self.detector_var.set('相机关闭' if self.paused else '等待有效画面')
             return
         frame = packet.frame
@@ -1133,8 +1156,12 @@ class PrivacyApp:
         ox, oy = (width - dw) / 2, (height - dh) / 2
         self.preview_map = ox, oy, dw, dh
         picture = core.Image.fromarray(core.cv2.cvtColor(frame, core.cv2.COLOR_BGR2RGB))
+        previous_image=self.preview_image
         self.preview_image = core.ImageTk.PhotoImage(picture.resize((dw, dh), core.Image.Resampling.BILINEAR))
-        canvas.create_image(ox, oy, image=self.preview_image, anchor='nw')
+        if canvas.find_withtag('preview-frame'):
+            canvas.itemconfigure('preview-frame',image=self.preview_image)
+            canvas.coords('preview-frame',ox,oy)
+        else:canvas.create_image(ox,oy,image=self.preview_image,anchor='nw',tags='preview-frame')
         for areas, color, label in ((self.rois, self.ACCENT, '检测'),):
             for number, roi in enumerate(areas, 1):
                 x1, y1, x2, y2 = roi
@@ -1176,6 +1203,8 @@ class PrivacyApp:
         self.detector_var.set(summary+'\n'+(getattr(packet,'capture_info','') or f'{fw}×{fh}'))
         if not self.rois:
             canvas.create_text(width / 2, 20, text='点击“检测区”，框选后方区域', fill=self.TEXT, font=('Microsoft YaHei UI', 10))
+        canvas.addtag_all('preview-overlay')
+        canvas.dtag('preview-frame','preview-overlay')
 
     def bar_size(self):
         if self.custom_bar_size:return tuple(self.custom_bar_size)
@@ -1281,15 +1310,29 @@ class PrivacyApp:
         self.bar_canvas.itemconfigure('bar-picture',image=self.bar_image)
         self.bar_canvas.coords('bar-picture',width/2,height/2)
 
-    def show_bar(self, packet=None, force_placeholder=False):
+    def keep_performer_during_miss(self,packet,now):
+        """Short display grace contains only the static actor, never stale faces."""
+        last=getattr(self,'last_reaction_at',None)
+        if (last is None or now-last>.45 or not self.using_performer() or not self.observer_active
+                or self.paused or self.enrolling or self.owner_verifying or not self.owner_samples
+                or packet.frame is None or not packet.ready or packet.error):return False
+        target=getattr(self,'performer_target',None)
+        candidate=next((item for item in packet.faces if item.get('track_id')==target),None)
+        if candidate is not None:
+            if candidate.get('identity')=='owner':return False
+            if self.attention_required.get() and not facing_screen(candidate):return False
+        return True
+
+    def show_bar(self, packet=None, force_placeholder=False,performer_only=False):
         if packet is None:
             packet = self.current_packet()
         self.ensure_bar()
         width, height = self.display_dimensions()
         canvas = self.bar_canvas
-        crop = None if self.demo_bar else self.clean_observer_crop(packet)
+        crop = None if self.demo_bar or performer_only else self.clean_observer_crop(packet)
+        overlap_hidden=(not self.demo_bar and not performer_only and self.valid_observer(packet) and crop is None)
         if crop is None:
-            if not force_placeholder:
+            if not force_placeholder and not (overlap_hidden and self.using_performer()):
                 self.hide_bar()
                 return
         mode=('performer' if self.using_performer() else 'placeholder' if crop is None else 'head',
@@ -1307,7 +1350,8 @@ class PrivacyApp:
         if self.using_performer():
             now=time.monotonic()
             item=next((item for item in packet.faces if item['bbox']==packet.face),{})
-            target='demo' if self.demo_bar or self.adjusting else item.get('track_id','observer')
+            target=('demo' if self.demo_bar or self.adjusting else
+                    self.performer_target if performer_only else item.get('track_id','observer'))
             if self.performer_started_at is None or self.performer_target!=target:
                 self.performer_started_at=now;self.performer_target=target
             if self.performer_renderer is None:self.performer_renderer=PerformerFrameRenderer(getattr(self,'active_media_dir',performer_asset_dir()),
@@ -1315,8 +1359,23 @@ class PrivacyApp:
             rgb=core.cv2.cvtColor(crop,core.cv2.COLOR_BGR2RGB) if crop is not None else None
             protected=not(self.demo_bar or self.adjusting) and self.protection_confirmed()
             image=self.performer_renderer.render(rgb,(width,height),now-self.performer_started_at,protected=protected)
+            if overlap_hidden or performer_only:
+                # Keep the local performer running while withholding a portrait
+                # that would expose the owner or display a partially black face.
+                from PIL import ImageDraw
+                layout=self.performer_renderer._layout((width,height))
+                box=layout['observer'];draw=ImageDraw.Draw(image)
+                draw.rounded_rectangle(box,12,fill=self.PANEL)
+                note='画面短暂丢失\n正在重新确认' if performer_only else '人物重叠\n暂不显示特写'
+                draw.text(((box[0]+box[2])/2,(box[1]+box[3])/2),note,
+                          anchor='mm',align='center',fill=self.MUTED,
+                          font=self.performer_renderer._font(13*layout['scale']))
+                if performer_only and not protected:
+                    draw.rectangle((round(width*.45),0,width,round(40*layout['scale'])),fill=self.BG)
+                    draw.text((width-18,round(19*layout['scale'])),'正在重新确认 · 人物画面已暂隐',anchor='ra',
+                              fill=self.MUTED,font=self.performer_renderer._font(10*layout['scale']))
             if protected and self.paint_mask_frames(image):
-                if self.bar is not None:self.bar.withdraw()
+                if self.bar is not None and self.bar_shown:self.bar.withdraw()
                 self.bar_shown=False
                 return
             self.clear_mask_frames()
@@ -1754,7 +1813,7 @@ def main():
             if app.notices:
                 raise RuntimeError('；'.join(app.notices))
             app.close()
-            print('SMOKE-TEST PASS: UI, guided enrollment ring, local animation preview, zero manual counts and synthetic clip encode/decode; camera remained off.')
+            print(f'SMOKE-TEST PASS: UI, guided enrollment ring, local animation preview ({len(app.performer_renderer._clips)} local clips loaded), zero manual counts and synthetic clip encode/decode; camera remained off.')
         else:
             root.after(120, root.deiconify)
             root.mainloop()

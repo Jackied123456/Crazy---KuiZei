@@ -27,6 +27,23 @@ class MediaTests(unittest.TestCase):
         self.data=self.root/'data'
         self.builtin=Path(__file__).parent/'assets'/'yaoshui'
 
+    def test_portable_pack_uses_only_matching_programme_and_can_be_disabled(self):
+        sidecar=self.root/'Crazy-local-media';sidecar.mkdir()
+        (sidecar/'patrol.gif').write_bytes(gif())
+        config=sidecar/'programs.json'
+        config.write_bytes((self.builtin/'programs.json').read_bytes())
+        executable=self.root/'Crazy.exe'
+        self.assertEqual(media.portable_media_dir(self.builtin,executable),sidecar)
+        with patch.object(media,'portable_media_dir',return_value=sidecar):
+            self.assertEqual(media.media_dir(self.data,self.builtin),sidecar)
+            media.clear_packs(self.data,disable_portable=True)
+            self.assertEqual(media.media_dir(self.data,self.builtin),self.builtin)
+            (self.source/'patrol.gif').write_bytes(gif())
+            media.import_pack(self.source,self.data,self.builtin)
+            self.assertNotEqual(media.media_dir(self.data,self.builtin),sidecar)
+        config.write_text('untrusted programme',encoding='utf-8')
+        self.assertEqual(media.portable_media_dir(self.builtin,executable),self.builtin)
+
     def test_import_known_slots_and_ignore_unrelated_files_and_config(self):
         (self.source/'patrol.gif').write_bytes(gif())
         (self.source/'unrelated.gif').write_bytes(b'not a GIF')

@@ -105,14 +105,27 @@ class WindowAPI:
         if not self.valid(token):return False
         hwnd=self.u.GetAncestor(mask.winfo_id(),2) or mask.winfo_id()
         x,y,w,h=bounds
+        flags=0x0010|0x0200  # NOACTIVATE | NOOWNERZORDER: never raise the app root.
+        source_topmost=bool(self.u.GetWindowLongPtrW(token.hwnd,-20)&8)
         # Remove the generic floating helper's TOPMOST flag before normal z-order.
         # Even an already-adjacent mask may still be topmost from its creation.
-        if not self.u.GetWindowLongPtrW(token.hwnd,-20)&8 and self.u.GetWindowLongPtrW(hwnd,-20)&8:
-            self.u.SetWindowPos(hwnd,ctypes.c_void_p(-2),0,0,0,0,0x0010|0x0001|0x0002)
+        if not source_topmost and self.u.GetWindowLongPtrW(hwnd,-20)&8:
+            self.u.SetWindowPos(hwnd,ctypes.c_void_p(-2),0,0,0,0,flags|0x0001|0x0002)
         previous=self.u.GetWindow(token.hwnd,3)  # GW_HWNDPREV
+        mask._cover_predecessor=int(previous or 0)
         if previous==hwnd:
-            return bool(self.u.SetWindowPos(hwnd,None,x,y,w,h,0x0010|0x0004))
-        return bool(self.u.SetWindowPos(hwnd,previous or None,x,y,w,h,0x0010))
+            rect=W.RECT()
+            if self.u.GetWindowRect(hwnd,ctypes.byref(rect)):
+                actual=(rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top)
+                if actual==tuple(bounds):return True
+            return bool(self.u.SetWindowPos(hwnd,None,x,y,w,h,flags|0x0004))
+        # When the target leads the normal window group, its predecessor can
+        # be a privileged always-on-top window. Referencing that HWND can fail
+        # with access denied. HWND_TOP positions within the normal group,
+        # still below every always-on-top window, without touching that HWND.
+        if previous and not source_topmost and self.u.GetWindowLongPtrW(previous,-20)&8:
+            previous=None
+        return bool(self.u.SetWindowPos(hwnd,previous or None,x,y,w,h,flags))
 
     def verify_cover(self,mask,token,bounds):
         """Check native geometry, visibility and ordering instead of trusting Tk."""

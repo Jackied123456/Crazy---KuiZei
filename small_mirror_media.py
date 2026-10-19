@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
 import uuid
 
 from PIL import Image
@@ -37,24 +38,48 @@ def validate_gif(data):
     return pixels
 
 
+def portable_media_dir(builtin,executable=None):
+    """Optional sidecar belonging to this executable, not a profile search.
+
+    Never execute a sidecar manifest: only the built-in programme bytes are
+    accepted. GIF decoding keeps the renderer's existing bounds and fallbacks.
+    """
+    builtin=Path(builtin)
+    if executable is None:
+        if not getattr(sys,'frozen',False):return builtin
+        executable=sys.executable
+    candidate=Path(executable).resolve().parent/'Crazy-local-media'
+    try:
+        manifest=candidate/'programs.json'
+        if _linked(candidate) or _linked(manifest):return builtin
+        if manifest.stat().st_size>128*1024:return builtin
+        if manifest.read_bytes()!=(builtin/'programs.json').read_bytes():return builtin
+        if not any((candidate/name).is_file() and not _linked(candidate/name) for name in CLIP_FILES.values()):return builtin
+        return candidate
+    except OSError:return builtin
+
+
 def media_dir(data_dir,builtin):
     """Resolve an opaque pack ID, never a user-supplied absolute path."""
     base=Path(data_dir);builtin=Path(builtin)
+    fallback=portable_media_dir(builtin)
     try:
         pointer=base/'active-media.json'
-        if _linked(pointer):return builtin
-        if pointer.stat().st_size>256:return builtin
-        token=json.loads(pointer.read_text(encoding='utf-8')).get('pack')
-        if not isinstance(token,str) or not TOKEN.fullmatch(token):return builtin
+        if _linked(pointer):return fallback
+        if pointer.stat().st_size>256:return fallback
+        choice=json.loads(pointer.read_text(encoding='utf-8'))
+        if choice.get('disabled') is True:return builtin
+        token=choice.get('pack')
+        if not isinstance(token,str) or not TOKEN.fullmatch(token):return fallback
         storage=base/'media-packs'
         candidate=storage/token
-        if _linked(storage) or _linked(candidate):return builtin
-        if candidate.resolve().parent!=storage.resolve():return builtin
+        if _linked(storage) or _linked(candidate):return fallback
+        if candidate.resolve().parent!=storage.resolve():return fallback
         config=candidate/'programs.json'
-        if _linked(config) or config.read_bytes()!=(builtin/'programs.json').read_bytes():return builtin
+        if _linked(config) or config.read_bytes()!=(builtin/'programs.json').read_bytes():return fallback
         return candidate
     except (OSError,ValueError,TypeError,AttributeError):
-        return builtin
+        return fallback
 
 
 def import_pack(source,data_dir,builtin):
@@ -97,7 +122,7 @@ def import_pack(source,data_dir,builtin):
         raise
 
 
-def clear_packs(data_dir):
+def clear_packs(data_dir,disable_portable=False):
     """Remove only this app's known imported files; refuse unexpected contents."""
     base=Path(data_dir);storage=base/'media-packs'
     if _linked(storage):raise ValueError('素材目录不能是链接。')
@@ -114,4 +139,9 @@ def clear_packs(data_dir):
     for folder in targets:shutil.rmtree(folder)
     (base/'active-media.json').unlink(missing_ok=True)
     (base/'active-media.tmp').unlink(missing_ok=True)
+    if disable_portable:
+        base.mkdir(parents=True,exist_ok=True)
+        temporary=base/'active-media.tmp'
+        temporary.write_text('{"disabled": true}',encoding='utf-8')
+        temporary.replace(base/'active-media.json')
     return len(targets)

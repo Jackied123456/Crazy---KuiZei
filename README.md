@@ -5,7 +5,7 @@
 [![Windows checks](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml/badge.svg)](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-52745B.svg)](LICENSE)
 ![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-52745B.svg)
-![Status: Beta](https://img.shields.io/badge/Status-v12%20Beta-777777.svg)
+![Status: Beta](https://img.shields.io/badge/Status-v13%20Beta-777777.svg)
 
 ## 忍了很久，最后还是打开了编辑器
 
@@ -98,17 +98,25 @@ TA还在看。
 
 一个在 Windows 本机运行的屏幕哨兵：检测后方观察者、尝试排除本人，按需遮挡指定窗口，并用动态相框提醒围观者。
 
-> v12 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
+> v13 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
-![窥贼 v12 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v12.0.0-beta.1/Crazy-v12-Beta-UI.png?preview=1)
+![窥贼 v13 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.0.0-beta.1/Crazy-v13-Beta-UI.png?preview=1)
 
 ## 下载
 
-Windows 用户可以前往 [v12 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v12.0.0-beta.1)，下载 `Crazy-v12-Beta-Windows.zip`，解压后运行 `Crazy-v12-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+Windows 用户可以前往 [v13 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v13.0.0-beta.1)，下载 `Crazy-v13-Beta-Windows.zip`，解压后运行 `Crazy-v13-Beta.exe`，无需单独安装 Python。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
 
-## v12 的检测与指引改进
+## v13 的检测与显示改进
+
+- 完整画面检测加后方区域放大搜索，持续复查已找到的小脸，并合并重复脸框。
+- 同一画面已认出本人时，明显分开的第二张脸也能作为额外入镜人物，不再必须靠清晰的大脸完成身份核对；本人不在画面或人物重叠时继续等待核对。
+- 已核对的非本人允许至多 0.8 秒短暂模糊，出现身份冲突或交叉时重新确认。
+- 遮罩已显示且位置、层级未变时不重复显示或定位；预览保留画布，只随新画面更新，减少覆盖其他窗口时的闪动。
+- 人物特写若与受保护人脸重叠，显示“人物重叠，暂不显示特写”；动态角色可继续播放，该裁剪不会进入录像。
+
+此前的指引与检测改进也保留：
 
 - 高灵敏度检测到的脸会进入身份核对，避免被后续更高的隐藏门槛直接跳过。
 - 身份待确认时可先遮挡内容；特写和录像继续要求确认非本人。
@@ -157,7 +165,7 @@ py -3.12 -m venv .venv
 
 本人特征使用 Windows DPAPI 加密。录像是本地普通 AVI 文件，没有额外加密；当前 Windows 账户或有相应磁盘权限的程序可能读取它。见 [隐私说明](PRIVACY.md)。
 
-Windows 发行程序为 `Crazy-v12-Beta.exe`。
+Windows 发行程序为 `Crazy-v13-Beta.exe`。
 
 ## 检查与构建
 
@@ -173,6 +181,8 @@ Windows 发行程序为 `Crazy-v12-Beta.exe`。
 [GitHub Actions](https://github.com/Jackied123456/Crazy---KuiZei/actions) 在推送和 Pull Request 时运行上述检查，页面顶部徽章显示当前状态。工作流使用固定提交的官方 Actions、只读仓库权限和普通 `pull_request` 触发器，不上传测试文件或用户数据。
 
 ## 本地素材
+
+Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.json` 必须与内置节目配置一致。附带目录不会进入公开包，已导入的本地素材优先。“删除导入素材”会停用附带目录，不删除目录原件；重新导入即可启用。
 
 在“设置 → 动画与台词”选择“导入本地动图”，选择装有 GIF 的文件夹。可只准备部分动作；文件名与 slots 如下。
 

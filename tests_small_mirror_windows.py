@@ -76,12 +76,30 @@ class WindowBindingTests(unittest.TestCase):
         calls=self.u.SetWindowPos.call_args_list
         self.assertEqual(len(calls),2)
         self.assertEqual(calls[0].args[1].value,ctypes.c_void_p(-2).value)
-        self.assertEqual(calls[1].args,(201,None,10,20,400,300,0x10|0x4))
+        self.assertEqual(calls[1].args,(201,None,10,20,400,300,0x210|0x4))
 
     def test_cover_stays_below_unrelated_foreground_window(self):
         self.u.GetWindowLongPtrW.return_value=0;self.u.GetWindow.return_value=300
         self.assertTrue(self.api.cover(self.mask,self.token,(10,20,400,300)))
-        self.u.SetWindowPos.assert_called_once_with(201,300,10,20,400,300,0x10)
+        self.u.SetWindowPos.assert_called_once_with(201,300,10,20,400,300,0x210)
+
+    def test_topmost_group_boundary_uses_normal_top_without_referencing_privileged_hwnd(self):
+        self.u.GetWindow.return_value=300
+        self.u.GetWindowLongPtrW.side_effect=lambda hwnd,_index:8 if hwnd==300 else 0
+        self.assertTrue(self.api.cover(self.mask,self.token,(10,20,400,300)))
+        self.u.SetWindowPos.assert_called_once_with(201,None,10,20,400,300,0x210)
+
+    def test_stable_cover_has_no_repeated_native_position_or_z_order_writes(self):
+        self.u.GetWindowLongPtrW.return_value=0;self.u.GetWindow.return_value=201
+        def rect(_hwnd,result):
+            value=result._obj;value.left=10;value.top=20;value.right=410;value.bottom=320
+            return True
+        self.u.GetWindowRect.side_effect=rect
+        for _ in range(100):self.assertTrue(self.api.cover(self.mask,self.token,(10,20,400,300)))
+        self.u.SetWindowPos.assert_not_called()
+        # Actual movement still requires an immediate update.
+        self.api.cover(self.mask,self.token,(15,25,400,300))
+        self.u.SetWindowPos.assert_called_once_with(201,None,15,25,400,300,0x210|0x4)
 
     def register(self):
         def register(_destination,_source,result):result._obj.value=555;return 0
