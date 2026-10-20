@@ -106,6 +106,35 @@ def resized_rect(rect, edges, dx, dy, desktop, minimum=(140,100), maximum=(1920,
     return tuple(round(value) for value in (x,y,w,h))
 
 
+def roi_hit_test(regions, point, preview_map, tolerance=8):
+    """Prefer visible resize handles to interiors, in camera-preview pixels."""
+    px,py=point;_ox,_oy,width,height=preview_map
+    tx,ty=tolerance/max(1,width),tolerance/max(1,height)
+    for index in reversed(range(len(regions))):
+        x0,y0,x1,y1=regions[index]
+        if not x0-tx<=px<=x1+tx or not y0-ty<=py<=y1+ty:continue
+        edges=('n' if abs(py-y0)<=ty else 's' if abs(py-y1)<=ty else '')
+        edges+=('w' if abs(px-x0)<=tx else 'e' if abs(px-x1)<=tx else '')
+        if edges:return index,edges
+    for index in reversed(range(len(regions))):
+        x0,y0,x1,y1=regions[index]
+        if x0<=px<=x1 and y0<=py<=y1:return index,'move'
+    return None
+
+
+def transform_roi(rect, action, dx, dy, minimum=(.025,.025)):
+    """Move or resize a normalized camera region without flipping or escaping."""
+    x0,y0,x1,y1=rect
+    if action=='move':
+        dx=max(-x0,min(1-x1,dx));dy=max(-y0,min(1-y1,dy))
+        return x0+dx,y0+dy,x1+dx,y1+dy
+    if 'w' in action:x0=max(0,min(x1-minimum[0],x0+dx))
+    if 'e' in action:x1=min(1,max(x0+minimum[0],x1+dx))
+    if 'n' in action:y0=max(0,min(y1-minimum[1],y0+dy))
+    if 's' in action:y1=min(1,max(y0+minimum[1],y1+dy))
+    return x0,y0,x1,y1
+
+
 class PrivacyApp:
     BG = '#1B2420'
     PANEL = '#243029'
@@ -158,6 +187,8 @@ class PrivacyApp:
         self.last_error = ''
         self.camera_error = ''
         self.camera_fault = False
+        self.camera_started_at=None;self.camera_last_frame_at=None
+        self.camera_health='idle';self.retry_after_stop=False;self.resume_after_enrollment=False
         self.observer_active = False
         self.observer_absent_since = None
         self.selection_mode = 'none'
@@ -168,6 +199,8 @@ class PrivacyApp:
         self.preview_map = None
         self.drag_start = None
         self.drag_end = None
+        self.roi_edit=None;self.roi_draft=None;self.roi_add_mode=False
+        self.roi_history={'detect':[],'exclude':[]}
         self.bar = None
         self.bar_canvas = None
         self.bar_image = None
@@ -222,7 +255,7 @@ class PrivacyApp:
         self.protection_serial=-1
         self.sensitive = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value='已暂停')
-        self.detail_var = tk.StringVar(value='先认识你、选好窗口，再开始保护。动画预览在设置里。')
+        self.detail_var = tk.StringVar(value='点击开始保护；首次使用会带你录入本人。动画预览在设置里。')
         self.region_var = tk.StringVar(value='保护区 0 个')
         self.detector_var = tk.StringVar(value='相机关闭 · 高灵敏度 · 完整头部特写')
         self.root.title(PRODUCT_TITLE+' · '+VERSION_LABEL)
@@ -247,7 +280,7 @@ class PrivacyApp:
             self.detail_var.set('统计数据暂不可用，旧文件已保留；可在统计面板备份并重置。')
         if enable_shell and sys.platform == 'win32':
             try:
-                self.tray = NativeTray(root, self.show_settings, self.toggle_pause,
+                self.tray = NativeTray(root, self.show_settings, self.start_protection,
                                        self.toggle_sensitive, self.open_stats,
                                        self.adjust_bar, self.close)
             except Exception as exc:
@@ -344,9 +377,16 @@ class PrivacyApp:
             self._preview_render_key=None
             self.render_preview(self.current_packet())
         else:
-            self.finish_selection()
+            if self.selection_mode!='none':self.finish_selection()
+            else:self.cancel_roi_drag()
             from small_mirror_home import draw_preview_placeholder
             draw_preview_placeholder(self)
+        button=getattr(self,'preview_toggle',None)
+        if button:button.configure(text='收起画面' if self.preview_enabled.get() else '展开画面')
+
+    def switch_preview(self):
+        self.preview_enabled.set(not self.preview_enabled.get())
+        self.toggle_preview()
 
     def open_preferences(self, page='显示'):
         if self.preferences_window is not None and self.preferences_window.winfo_exists():
@@ -622,8 +662,8 @@ class PrivacyApp:
         elif self.protection_confirmed():
             text='已遮挡 · '+('监测中断，保持遮挡' if getattr(self,'camera_fault',False) or self.paused and self.auto_mask else '双击遮罩或按 Ctrl+Alt+H 恢复')
         elif self.mask_active:text='等待保护窗口显示 · 尚未确认遮挡'
-        elif not self.owner_samples and not self.mask_active:text='待设置 · 先认识你、选好窗口'
-        elif not self.has_protection():text='未选保护窗口 · 先选择并试遮挡'
+        elif not self.owner_samples and not self.mask_active:text='首次使用 · 点击开始保护，跟着指引录入本人'
+        elif not self.has_protection():text='可先开始监测，选择窗口后可遮挡内容' if self.paused else '仅监测 · 未设置内容遮挡'
         elif self.paused:text='待开启 · 已选窗口，先试遮挡'
         elif not self.owner_samples:text='待录入本人 · 自动遮挡尚未开启'
         elif not self.sensitive.get():text='自动遮挡关闭 · 可手动试遮挡'
@@ -856,10 +896,14 @@ class PrivacyApp:
             self.owner_status.set('没保存好，旧模板还在：'+str(exc));return
         self.owner_samples=samples;self.pending_owner_samples=None;self.owner_error=''
         self.owner_summary.set('本人：已录入')
-        self.detail_var.set('已经认识你了。选择保护窗口，点“试遮挡”，再开始保护。')
+        resume=getattr(self,'resume_after_enrollment',False)
+        if resume:self.owner_camera_was_paused=False
         self.cancel_enrollment()
+        self.detail_var.set('已经认识你，正在监测。可选择需要遮挡的窗口，并点“试遮挡”。' if resume else
+                            '已经认识你了。选择保护窗口，点“试遮挡”，再开始保护。')
 
     def cancel_enrollment(self):
+        self.resume_after_enrollment=False
         if self.worker and getattr(self,'pending_owner_samples',None) is not None:
             self.worker.identity_command('templates',self.owner_samples)
         self.pending_owner_samples=None;self.owner_verified=False
@@ -881,26 +925,60 @@ class PrivacyApp:
         self.enroll_button.configure(text='开始录入',state='normal',command=self.begin_enrollment)
 
     def choose_selection(self, mode):
+        self.cancel_roi_drag()
         self.preview_enabled.set(True);self.toggle_preview()
         self.selection_mode = mode
-        self.edit_hint.set('拖拽新增检测区' if mode == 'detect' else '拖拽框住本人活动范围')
+        self.edit_hint.set('拖边缩放 · 框内移动 · 空白处新增' if mode == 'detect' else '拖拽框住本人活动范围')
         self.edit_bar.pack(fill='x',pady=(10,0),before=self.preview)
-        self.detail_var.set('拖一个框，把想监测的后方范围圈起来。可以画多个。')
+        self._preview_render_key=None
+        self.detail_var.set('拖边缘或四角调整大小，框内拖动可移动。点“新增框”或按住 Shift 拖动，可在已有框里新增。')
+
+    def cancel_roi_drag(self):
+        self.roi_edit=self.roi_draft=None
+        self.drag_start=self.drag_end=None
+        self.roi_add_mode=False
+        self._preview_render_key=None
+
+    def new_roi(self):
+        if self.selection_mode not in ('detect','exclude'):self.choose_selection('detect')
+        self.cancel_roi_drag();self.roi_add_mode=True
+        self.preview.configure(cursor='crosshair')
+        self.edit_hint.set('现在拖出一个新框；松开后可继续拖边缩放。')
+
+    def region_history(self):
+        mode=self.selection_mode if self.selection_mode=='exclude' else 'detect'
+        return self.roi_history[mode]
+
+    def remember_regions(self):
+        regions=self.exclusions if self.selection_mode=='exclude' else self.rois
+        history=self.region_history();history.append(list(regions))
+        del history[:-30]
 
     def finish_selection(self):
+        self.cancel_roi_drag()
         self.selection_mode = 'none'
-        self.drag_start = self.drag_end = None
+        self.preview.configure(cursor='')
         self.edit_bar.pack_forget()
         self.detail_var.set(f'已设置 {len(self.rois)} 个检测区。本人会自动排除。')
 
     def undo_selected(self):
+        self.cancel_roi_drag()
+        history=self.region_history()
+        if history:
+            if self.selection_mode=='exclude':self.exclusions=history.pop()
+            else:self.rois=history.pop()
+            self.update_settings()
+            self.detail_var.set('已撤销上一步检测区域修改。')
+            return
         if self.selection_mode == 'exclude':
             if self.exclusions:self.exclusions.pop()
             self.update_settings()
         else:self.undo_roi()
 
     def clear_selected(self):
+        self.cancel_roi_drag()
         if self.selection_mode == 'exclude':
+            if self.exclusions:self.remember_regions()
             self.exclusions = []
             self.update_settings()
         else:self.clear_roi()
@@ -926,9 +1004,75 @@ class PrivacyApp:
         if self.tray:
             self.tray.update(self.paused, self.sensitive.get())
 
+    def start_protection(self):
+        if self.worker and self.worker.is_alive():
+            self.toggle_pause();return
+        if not self.owner_samples:
+            self.open_owner_settings()
+            self.resume_after_enrollment=True
+            self.begin_enrollment()
+            return
+        self.toggle_pause()
+
+    def retry_camera(self):
+        if self.worker and self.worker.is_alive():
+            self.retry_after_stop=True
+            if not self.worker.stop_event.is_set():self.toggle_pause(keep_cover=True)
+            else:
+                self.paused=True
+                self.camera_stop_requested_at=time.monotonic()
+            self.detail_var.set('正在释放相机，释放后重试；已有遮挡会保留。')
+        else:self.start_protection()
+
+    def update_camera_health(self,packet,now):
+        """Transport freshness is independent of inference and preview visibility."""
+        prior=getattr(self,'camera_health',None)
+        if self.paused:
+            health='closing' if self.worker else 'error' if packet.error else 'idle'
+        elif self.worker is None:health='idle'
+        elif hasattr(self.worker,'preview_latest'):
+            snapshot=self.worker.preview_latest()
+            if snapshot:
+                self.camera_last_frame_at=snapshot[1]
+            last=getattr(self,'camera_last_frame_at',None)
+            started=getattr(self,'camera_started_at',None)
+            if last is not None and now-last>2:health='stalled'
+            elif last is not None and now-last>core.MAX_FRAME_AGE:health='waiting'
+            elif snapshot is not None:health='live' if packet.ready and not packet.error else 'detecting'
+            elif last is not None:health='waiting'
+            elif started is not None and now-started>12:health='stalled'
+            else:health='starting'
+        else:health='live' if packet.frame is not None else 'starting'
+        self.camera_health=health
+        if health=='closing' and now-getattr(self,'camera_stop_requested_at',now)>6:
+            self.detail_var.set('相机驱动尚未释放，界面仍可操作；若一直未恢复，请退出并重新打开程序。')
+        if health=='closing':text,state='正在关闭相机…','disabled'
+        elif health=='starting':text,state='正在启动…','disabled'
+        elif health=='stalled':text,state='暂停保护','normal'
+        elif self.paused:text,state=('重新开启' if packet.error else '开始保护'),'normal'
+        else:text,state='暂停保护','normal'
+        self.camera_button.configure(text=text,state=state)
+        for name,visible in (('camera_cancel_button',health=='starting'),
+                             ('camera_retry_button',health in ('stalled','error'))):
+            button=getattr(self,name,None)
+            if button:
+                if visible and not button.winfo_manager():button.pack(side='right',padx=round(6*self.ui_scale))
+                elif not visible and button.winfo_manager():button.pack_forget()
+        button=getattr(self,'preview_toggle',None)
+        if button:
+            if self.worker and not self.paused:
+                button.configure(state='normal')
+                if not button.winfo_manager():button.pack(side='right')
+            elif button.winfo_manager():button.pack_forget()
+        if health!=prior and not self.preview_enabled.get() and hasattr(self,'preview'):
+            from small_mirror_home import draw_preview_placeholder
+            draw_preview_placeholder(self)
+        return health
+
     def toggle_pause(self,keep_cover=False):
         if self.worker and self.worker.is_alive() and not self.worker.stop_event.is_set():
             self.paused = True
+            self.camera_stop_requested_at=time.monotonic()
             if self.enrolling or self.owner_verifying:self.cancel_enrollment()
             self.worker.stop()
             self.reset_observer()
@@ -948,6 +1092,7 @@ class PrivacyApp:
             self.detail_var.set('请输入 0 到 10 的相机编号。')
             return
         self.paused = False
+        self.camera_started_at=time.monotonic();self.camera_last_frame_at=None
         self.last_error = ''
         self.camera_error = ''
         self.last_serial = -1
@@ -956,7 +1101,7 @@ class PrivacyApp:
         self.worker.configure(self.rois, True, self.sensitivity.get(), self.resolution.get(), exclusions=self.exclusions)
         self.worker.start()
         self.preview_enabled.set(True);self.toggle_preview()
-        self.camera_button.configure(text='暂停', state='normal')
+        self.camera_button.configure(text='正在启动…', state='disabled')
         self.set_camera_controls(True)
         self.detail_var.set('正在开启相机；本人核验后自动排除。' if self.owner_samples else '相机开启后，请点“认识我”录入本人。')
         self.save_config()
@@ -1078,6 +1223,11 @@ class PrivacyApp:
             self.set_camera_controls(False)
             self.update_tray()
             packet = core.FacePacket(error=latest.error)
+            if getattr(self,'retry_after_stop',False):
+                self.retry_after_stop=False
+                self.start_protection()
+                packet=self.current_packet()
+        health=self.update_camera_health(packet,now)
         if packet.error and packet.error != self.last_error:
             self.last_error = packet.error
             self.detail_var.set(packet.error)
@@ -1091,6 +1241,12 @@ class PrivacyApp:
         self.owner_summary.set('本人：已认出你' if packet.owner_boxes else '本人：已录入' if self.owner_samples else '本人：还没录入')
         if self.paused:
             self.status_var.set('运行异常 · 已暂停' if packet.error else '正在关闭相机…' if self.worker else '已暂停 · 相机关闭')
+        elif health=='stalled':
+            self.status_var.set('相机画面已中断 · 可重试')
+        elif health=='waiting':
+            self.status_var.set('等待相机新画面…')
+        elif health=='detecting':
+            self.status_var.set('实时画面正常 · 识别处理中')
         elif not packet.ready:
             self.status_var.set('相机准备中' if not packet.error else '相机异常')
         elif self.enrolling:
@@ -1110,9 +1266,14 @@ class PrivacyApp:
             elif any(item.get('identity')=='uncertain' for item in inside):status='身份待确认'
             elif any(item.get('identity')=='owner' for item in inside):status='本人已排除 · 监测中'
             else:status='监测中'
+            if not self.has_protection():status+=' · 仅监测，未设置遮挡'
+            elif not self.sensitive.get():status+=' · 自动遮挡关闭'
             self.status_var.set(status)
-        if self.root.state() == 'normal':
-            if self.preview_enabled.get():self.render_preview(self.live_preview_packet(packet))
+        if self.root.state() not in ('iconic','withdrawn') and self.preview_enabled.get():
+            preview=self.live_preview_packet(packet)
+            if health in ('stalled','waiting'):
+                preview=core.FacePacket(capture_info='相机画面已中断' if health=='stalled' else '等待相机新画面…')
+            self.render_preview(preview)
         if self.adjusting:
             self.show_bar(packet, force_placeholder=True)
         elif show_observer:
@@ -1129,12 +1290,12 @@ class PrivacyApp:
         if self.paused or self.worker is None or not hasattr(self.worker,'preview_latest'):return packet
         snapshot=self.worker.preview_latest()
         if snapshot is None:return packet
-        _serial,captured_at,frame=snapshot
+        serial,captured_at,frame=snapshot
         if time.monotonic()-captured_at>core.MAX_FRAME_AGE:return packet
         # Box labels belong to recent matching-size detection frames only.
         recent=(packet.frame is not None and frame.shape==packet.frame.shape
                 and time.monotonic()-packet.timestamp<.3)
-        return replace(packet,frame=frame,faces=packet.faces if recent else [],
+        return replace(packet,serial=serial,timestamp=captured_at,frame=frame,faces=packet.faces if recent else [],
                        owner_boxes=packet.owner_boxes if recent else [],ready=True,
                        face=None,roi=None,region_index=None,identity_ready=False,private_boxes=[])
 
@@ -1163,18 +1324,53 @@ class PrivacyApp:
             return
         x, y, w, h = self.preview_map
         if x <= event.x <= x + w and y <= event.y <= y + h:
+            point=self.preview_point(event)
+            regions=self.exclusions if self.selection_mode=='exclude' else self.rois
+            hit=None if self.roi_add_mode or getattr(event,'state',0)&1 else roi_hit_test(
+                regions,point,self.preview_map,max(7,8*self.ui_scale))
+            if hit:
+                index,action=hit
+                self.roi_edit=(index,tuple(regions[index]),point,action)
+                self.roi_draft=tuple(regions[index])
+                return
             self.drag_start = self.preview_point(event)
             self.drag_end = self.drag_start
 
+    def roi_cursor(self,event):
+        if self.selection_mode not in ('detect','exclude') or not self.preview_map:
+            self.preview.configure(cursor='');return
+        if self.roi_add_mode or getattr(event,'state',0)&1:
+            self.preview.configure(cursor='crosshair');return
+        hit=roi_hit_test(self.exclusions if self.selection_mode=='exclude' else self.rois,
+                         self.preview_point(event),self.preview_map,max(7,8*self.ui_scale))
+        cursors={'n':'top_side','s':'bottom_side','w':'left_side','e':'right_side','nw':'top_left_corner',
+                 'ne':'top_right_corner','sw':'bottom_left_corner','se':'bottom_right_corner','move':'fleur'}
+        self.preview.configure(cursor=cursors.get(hit[1],'crosshair') if hit else 'crosshair')
+
     def roi_drag(self, event):
-        if self.drag_start:
+        if self.roi_edit and self.preview_map:
+            _index,original,anchor,action=self.roi_edit
+            point=self.preview_point(event)
+            self.roi_draft=transform_roi(original,action,point[0]-anchor[0],point[1]-anchor[1])
+        elif self.drag_start:
             self.drag_end = self.preview_point(event)
 
     def roi_finish(self, event):
+        if self.roi_edit:
+            self.roi_drag(event)
+            index,original,_anchor,_action=self.roi_edit
+            regions=self.exclusions if self.selection_mode=='exclude' else self.rois
+            draft=self.roi_draft
+            if index<len(regions) and draft and draft!=original:
+                self.remember_regions();regions[index]=draft
+                self.update_settings()
+                self.detail_var.set(f'第 {index+1} 个框已调整，检测范围已保存。')
+            self.cancel_roi_drag();return
         if not self.drag_start:
             return
         start, end = self.drag_start, self.preview_point(event)
         self.drag_start = self.drag_end = None
+        self.roi_add_mode=False
         if end and abs(end[0] - start[0]) >= .025 and abs(end[1] - start[1]) >= .025:
             roi = (min(start[0], end[0]), min(start[1], end[1]), max(start[0], end[0]), max(start[1], end[1]))
             if self.selection_mode == 'exclude':
@@ -1185,6 +1381,7 @@ class PrivacyApp:
     def add_exclusion(self, roi):
         valid = core.normalize_rois([roi])
         if valid:
+            self.remember_regions()
             self.exclusions = core.normalize_rois(self.exclusions + valid)
             self.update_settings()
             self.detail_var.set(f'本人排除区 {len(self.exclusions)} 个。请覆盖转头、前倾时的头部活动范围。')
@@ -1192,9 +1389,10 @@ class PrivacyApp:
     def add_roi(self, roi):
         valid = core.normalize_rois([roi])
         if valid:
+            self.remember_regions()
             self.rois = core.normalize_rois(self.rois + valid)
             self.update_settings()
-            self.detail_var.set(f'已添加第 {len(self.rois)} 个检测框，可继续拖拽新增。框内留出头发和耳侧空间，并避开本人。')
+            self.detail_var.set(f'已添加第 {len(self.rois)} 个检测框。拖边缩放，框内移动；点“新增框”可继续添加。')
 
     def undo_roi(self):
         if self.rois:
@@ -1203,6 +1401,7 @@ class PrivacyApp:
         self.detail_var.set(f'剩余 {len(self.rois)} 个检测框。拖拽可以继续新增。')
 
     def clear_roi(self):
+        if self.rois:self.remember_regions()
         self.rois = []
         self.update_settings()
         self.detail_var.set('检测框已清空。未选择检测框时不会自动触发。')
@@ -1210,7 +1409,8 @@ class PrivacyApp:
     def render_preview(self, packet):
         canvas = self.preview
         width, height = max(1, canvas.winfo_width()), max(1, canvas.winfo_height())
-        key=(packet.serial,id(packet.frame),packet.error,width,height,tuple(map(tuple,self.rois)),
+        key=(packet.serial,packet.timestamp,id(packet.frame),packet.error,width,height,tuple(map(tuple,self.rois)),
+             tuple(map(tuple,self.exclusions)),self.selection_mode,self.roi_draft,self.roi_edit,
              self.drag_start,self.drag_end,self.debug.get(),self.enrolling,self.attention_required.get(),self.paused,packet.capture_info)
         if key==getattr(self,'_preview_render_key',None):return
         self._preview_render_key=key
@@ -1227,6 +1427,11 @@ class PrivacyApp:
                 message = packet.capture_info or '正在开启相机…'
                 note=('请检查相机是否被其他应用占用，或在设置里更换相机。'
                       if '响应较慢' in message else '你可以继续操作界面，或点“暂停”。')
+            if getattr(self,'camera_health','')=='stalled':
+                message='相机画面已中断'
+                note='点“重试相机”重新连接；已有内容遮挡会保留。'
+            elif getattr(self,'camera_health','')=='waiting':
+                message='等待相机新画面…';note='暂不使用停住的旧画面进行判断。'
             from small_mirror_home import draw_preview_state
             draw_preview_state(self,message,note)
             self.detector_var.set('相机关闭' if self.paused else '等待有效画面')
@@ -1243,12 +1448,23 @@ class PrivacyApp:
             canvas.itemconfigure('preview-frame',image=self.preview_image)
             canvas.coords('preview-frame',ox,oy)
         else:canvas.create_image(ox,oy,image=self.preview_image,anchor='nw',tags='preview-frame')
-        for areas, color, label in ((self.rois, self.ACCENT, '检测'),):
+        groups=[(self.rois,self.ACCENT,'检测')]
+        if self.selection_mode=='exclude':groups.append((self.exclusions,'#f29393','排除'))
+        for areas, color, label in groups:
             for number, roi in enumerate(areas, 1):
+                editing=(self.selection_mode=='detect' and areas is self.rois or
+                         self.selection_mode=='exclude' and areas is self.exclusions)
+                if editing and self.roi_edit and number-1==self.roi_edit[0]:roi=self.roi_draft
                 x1, y1, x2, y2 = roi
                 canvas.create_rectangle(ox+x1*dw, oy+y1*dh, ox+x2*dw, oy+y2*dh, outline=color, width=2)
                 canvas.create_text(ox+x1*dw+5, oy+y1*dh+5, text=f'{label} {number}',
                                    anchor='nw', fill=color, font=('Microsoft YaHei UI', 9))
+                if editing:
+                    half=max(3,round(3*self.ui_scale))
+                    for hx,hy in ((x1,y1),((x1+x2)/2,y1),(x2,y1),(x2,(y1+y2)/2),
+                                  (x2,y2),((x1+x2)/2,y2),(x1,y2),(x1,(y1+y2)/2)):
+                        px,py=ox+hx*dw,oy+hy*dh
+                        canvas.create_rectangle(px-half,py-half,px+half,py+half,fill=color,outline=self.BG)
         if self.drag_start and self.drag_end:
             x1, y1 = self.drag_start
             x2, y2 = self.drag_end

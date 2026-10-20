@@ -34,7 +34,7 @@ def main():
     for source,_destination in data:
         if source.is_symlink() or not source.is_file():raise SystemExit('Missing or linked build input: '+source.name)
     arguments=[sys.executable,'-m','PyInstaller','--noconfirm','--onefile',
-               '--noconsole','--noupx','--name','Crazy-v13.4-Beta',
+               '--noconsole','--noupx','--name','Crazy-v13.6-Beta',
                '--specpath',str(ROOT/'build'),'--workpath',str(ROOT/'build'/'pyinstaller'),
                '--distpath',str(ROOT/'dist'),'--paths',str(ROOT),
                '--icon',str(icon),
@@ -44,7 +44,7 @@ def main():
         arguments+=['--add-data',str(source)+os.pathsep+destination]
     arguments.append(str(ROOT/'small_mirror.py'))
     subprocess.run(arguments,cwd=ROOT,check=True)
-    print('LOCAL BUILD COMPLETE: dist/Crazy-v13.4-Beta.exe. Public distribution requires the source publication gate and binary privacy review.')
+    print('LOCAL BUILD COMPLETE: dist/Crazy-v13.6-Beta.exe. Public distribution requires the source publication gate and binary privacy review.')
 
 
 if __name__=='__main__':

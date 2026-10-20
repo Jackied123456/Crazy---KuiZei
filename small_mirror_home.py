@@ -41,7 +41,12 @@ def draw_preview_placeholder(app):
         return
     canvas=app.preview;canvas.delete('all')
     app.preview_image=app.preview_map=None;app._preview_render_key=None
-    draw_preview_state(app,'画面已隐藏','检测与保护状态请看右上角；勾选“显示画面”查看后方。')
+    if getattr(app,'camera_health','') in ('stalled','error'):
+        draw_preview_state(app,'相机画面已中断','点“重试相机”重新连接；已有内容遮挡会保留。')
+    elif app.paused:
+        draw_preview_state(app,'开始后查看后方画面','点击“开始保护”，相机会自动打开。')
+    else:
+        draw_preview_state(app,'画面已收起','收起不会暂停监测；点“展开画面”查看后方。')
 
 
 def build_home(app):
@@ -61,7 +66,7 @@ def build_home(app):
     ttk.Label(copy,text=SLOGAN,font=('Microsoft YaHei UI',24,'bold')).pack(anchor='w')
     subtitle=ttk.Label(copy,text='你盯工作，我盯后排。',foreground=app.MUTED)
     subtitle.pack(anchor='w',pady=(round(6*s),0))
-    ttk.Label(app.home_panel,textvariable=app.status_var,style='Status.TLabel').pack(side='right',padx=(round(12*s),0))
+    ttk.Label(app.home_panel,textvariable=app.status_var,style='Status.TLabel',wraplength=round(200*s),justify='right').pack(side='right',padx=(round(12*s),0))
 
     app.home_cards=ttk.Frame(outer);app.home_cards.grid(row=3,column=0,sticky='nsew')
     app.home_cards.columnconfigure(0,weight=3)
@@ -71,20 +76,24 @@ def build_home(app):
     camera.grid(row=0,column=0,sticky='nsew',padx=(0,round(16*s)))
     title=ttk.Frame(camera,style='Paper.TFrame');title.pack(fill='x',pady=(0,round(9*s)))
     ttk.Label(title,text='后方画面',style='Paper.TLabel',font=('Microsoft YaHei UI',10,'bold')).pack(side='left')
-    ttk.Checkbutton(title,text='显示画面',style='Paper.TCheckbutton',variable=app.preview_enabled,command=app.toggle_preview).pack(side='right')
+    app.preview_toggle=ttk.Button(title,text='展开画面',style='Compact.TButton',command=app.switch_preview,state='disabled')
     app.edit_bar=ttk.Frame(camera,style='Paper.TFrame');app.edit_hint=tk.StringVar(value='')
-    ttk.Label(app.edit_bar,textvariable=app.edit_hint,style='Paper.TLabel',foreground=app.MUTED).pack(anchor='w')
+    edit_note=ttk.Label(app.edit_bar,textvariable=app.edit_hint,style='Paper.TLabel',foreground=app.MUTED,wraplength=round(330*s))
+    edit_note.pack(anchor='w')
+    app.edit_bar.bind('<Configure>',lambda event:edit_note.configure(wraplength=max(80,event.width-round(8*s))))
     edit_buttons=ttk.Frame(app.edit_bar,style='Paper.TFrame');edit_buttons.pack(fill='x',pady=(round(4*s),round(6*s)))
-    for label,callback in (('完成',app.finish_selection),('撤销',app.undo_selected),('清空',app.clear_selected)):
+    for label,callback in (('完成',app.finish_selection),('新增框',app.new_roi),('撤销',app.undo_selected),('清空',app.clear_selected)):
         ttk.Button(edit_buttons,text=label,style='Compact.TButton',command=callback).pack(side='left',padx=(0,round(5*s)))
     app.preview=tk.Canvas(camera,height=round(210*s),bg=app.BG,highlightthickness=0)
     app.preview.bind('<ButtonPress-1>',app.roi_start)
     app.preview.bind('<B1-Motion>',app.roi_drag)
     app.preview.bind('<ButtonRelease-1>',app.roi_finish)
+    app.preview.bind('<Motion>',app.roi_cursor)
     app.preview.bind('<Configure>',lambda _e:draw_preview_placeholder(app))
     app.preview_toolbar=ttk.Frame(camera,style='Paper.TFrame');app.preview_toolbar.pack(side='bottom',fill='x',pady=(round(9*s),0))
     ttk.Button(app.preview_toolbar,text='设置检测区',style='Paper.TButton',command=lambda:app.choose_selection('detect')).pack(side='left')
     ttk.Button(app.preview_toolbar,text='相机设置',style='Compact.TButton',command=lambda:app.open_preferences('相机')).pack(side='right')
+    app.camera_retry_button=ttk.Button(app.preview_toolbar,text='重试相机',style='Compact.TButton',command=app.retry_camera)
     app.preview.pack(fill='both',expand=True)
 
     checklist=ttk.Frame(app.home_cards,style='Card.TFrame',padding=round(12*s))
@@ -114,8 +123,9 @@ def build_home(app):
     control=ttk.Frame(outer);control.grid(row=4,column=0,sticky='ew',pady=(round(12*s),round(5*s)))
     summary=ttk.Label(control,textvariable=app.protection_summary,foreground=app.MUTED,wraplength=round(620*s))
     summary.pack(side='left',fill='x',expand=True,padx=(0,round(15*s)))
-    app.camera_button=ttk.Button(control,text='开始保护',style='Primary.TButton',command=app.toggle_pause)
+    app.camera_button=ttk.Button(control,text='开始保护',style='Primary.TButton',command=app.start_protection)
     app.camera_button.pack(side='right')
+    app.camera_cancel_button=ttk.Button(control,text='取消启动',style='Compact.TButton',command=lambda:app.toggle_pause(keep_cover=True))
     lower=ttk.Frame(outer);lower.grid(row=5,column=0,sticky='ew',pady=(0,round(5*s)))
     ttk.Checkbutton(lower,text='保存原始特写',variable=app.record_enabled,command=app.recording_changed).pack(side='left')
     ttk.Button(lower,text='事件记录',style='Quiet.TButton',command=app.open_stats).pack(side='right')

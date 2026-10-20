@@ -270,17 +270,18 @@ class PerformerFrameRenderer:
     def _layout(size):
         w, h = max(240, int(size[0])), max(160, int(size[1]))
         s = min(w / 640, h / 400)
-        margin, gap = max(10, round(18*s)), max(8, round(14*s))
-        top, bottom = max(37, round(55*s)), max(25, round(34*s))
-        left_w = round((w - 2*margin - gap) * .38)
-        card_top, card_bottom = top, h - bottom
-        label_h = max(44, round(62*s))
-        actor = (margin, card_top, margin + left_w, card_bottom - label_h)
+        margin, gap = max(8, round(12*s)), max(8, round(12*s))
+        top, bottom = max(28, round(44*s)), max(18, round(24*s))
+        left_w = round((w - 2*margin - gap) * .52)
+        label_h = max(38, round(66*s))
+        card_top, card_bottom = top, h - bottom - label_h - max(5,round(10*s))
+        actor = (margin, card_top, margin + left_w, card_bottom)
         observer = (margin + left_w + gap, card_top, w-margin, card_bottom)
         return dict(size=(w,h), scale=s, margin=margin, gap=gap, top=top,
                     bottom=bottom, actor=actor, observer=observer,
                     actor_size=(actor[2]-actor[0], actor[3]-actor[1]),
-                    label=(margin, actor[3]+max(5,round(9*s))))
+                    caption=(margin,card_bottom+max(5,round(10*s)),w-margin,h-bottom),
+                    label=(margin,card_bottom+max(5,round(10*s))))
 
     def _cache(self, key, value):
         old = self._scaled.pop(key, None)
@@ -369,7 +370,9 @@ class PerformerFrameRenderer:
         draw.text((m,max(9,round(15*s))), '窥贼 · 窥屏监测', font=self._font(16*s,True), fill=TEXT)
         status_font = self._font(10*s)
         status_width = draw.textbbox((0,0),status,font=status_font)[2]
-        if status_width < w * .5:
+        title_width=draw.textbbox((0,0),'窥贼 · 窥屏监测',font=self._font(16*s,True))[2]
+        status_in_footer=status_width>w-2*m-title_width-layout['gap']
+        if not status_in_footer:
             draw.text((w-m-status_width,max(12,round(19*s))),status,font=status_font,fill=MUTED)
         else:
             draw.text((m,h-layout['bottom']+max(5,round(11*s))),status,font=status_font,fill=MUTED)
@@ -393,7 +396,9 @@ class PerformerFrameRenderer:
             font = self._font(10*s); bounds = draw.textbbox((0,0),note,font=font)
             draw.text((cx-(bounds[2]-bounds[0])/2,cy+50*s),note,font=font,fill=MUTED)
         footer = 'Beta · 仅供娱乐'
-        draw.text((w-m-draw.textbbox((0,0),footer,font=status_font)[2],h-layout['bottom']+max(5,round(11*s))),footer,font=status_font,fill=MUTED)
+        footer_width=draw.textbbox((0,0),footer,font=status_font)[2]
+        if not status_in_footer or status_width+footer_width+layout['gap']<=w-2*m:
+            draw.text((w-m-footer_width,h-layout['bottom']+max(3,round(5*s))),footer,font=status_font,fill=MUTED)
         self._backgrounds[key] = image
         while len(self._backgrounds)>6:
             self._backgrounds.popitem(last=False)
@@ -441,14 +446,11 @@ class PerformerFrameRenderer:
             portrait = ImageOps.contain(portrait,(ox1-ox0,oy1-oy0),Image.Resampling.BILINEAR)
             self._round_image(image,portrait,layout['observer'],radius)
         draw = ImageDraw.Draw(image)
-        x,y = layout['label']
-        font = self._font(18*s,True)
+        x0,y0,x1,y1=layout['caption']
+        font = self._font(max(18,32*s),True)
         # At minimum size, fit the whole phrase rather than clipping its end.
-        max_width = layout['actor_size'][0]
-        while draw.textbbox((0,0),state.phrase,font=font)[2]>max_width and font.size>9:
+        max_width = x1-x0
+        while draw.textbbox((0,0),state.phrase,font=font)[2]>max_width and font.size>12:
             font = self._font(font.size-1,True)
-        draw.text((x,y),state.phrase,font=font,fill=TEXT)
-        label_font = self._font(10*s)
-        actor_label=f'本地动图 · {state.label}' if has_clip else ('原创哨兵 · 未加载该人物动作' if self._library.ready.is_set() else '正在准备人物动图…')
-        draw.text((x,y+max(22,round(29*s))),actor_label,font=label_font,fill=MUTED)
+        draw.text(((x0+x1)/2,(y0+y1)/2),state.phrase,font=font,fill=TEXT,anchor='mm')
         return image

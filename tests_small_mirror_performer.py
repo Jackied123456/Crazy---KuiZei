@@ -65,6 +65,21 @@ class PerformerTests(unittest.TestCase):
         self.assertEqual(self.renderer.status_text(None,True),'内容已暂时隐藏')
         self.assertEqual(self.renderer.status_text(object(),True),'内容已暂时隐藏')
 
+    def test_headline_stays_visible_and_clear_of_video_at_small_and_large_sizes(self):
+        from PIL import ImageDraw
+        original=ImageDraw.ImageDraw.text;captured=[]
+        def record(draw,xy,text,*args,**kwargs):
+            if kwargs.get('anchor')=='mm':
+                captured.append(draw.textbbox(xy,text,font=kwargs.get('font'),anchor='mm'))
+            return original(draw,xy,text,*args,**kwargs)
+        with patch.object(ImageDraw.ImageDraw,'text',new=record):
+            for size in ((240,160),(420,260),(560,340),(640,400),(1000,620)):
+                for step in self.renderer.program.steps:
+                    captured.clear();self.renderer.render(None,size,step[3]/1000+.15)
+                    self.assertEqual(len(captured),1)
+                    x0,y0,x1,y1=captured[0];layout=self.renderer._layout(size)
+                    self.assertTrue(0<=x0<x1<=size[0] and layout['actor'][3]<y0<y1<size[1],(size,captured))
+
     def test_fresh_rgb_observer_pil_array_and_no_retained_face(self):
         red = Image.new('RGB',(120,150),'red')
         array = np.asarray(red)

@@ -97,6 +97,8 @@ class Tests(unittest.TestCase):
         obj.protection_serial=-1;obj.mask_active=False;obj.protected_windows=[];obj.protected_masks={}
         obj.window_api=obj.window_picker=obj.recordings_panel=None
         obj.selection_mode, obj.debug = 'none', Value(False)
+        obj.roi_edit=obj.roi_draft=None;obj.roi_add_mode=False
+        obj.roi_history={'detect':[],'exclude':[]}
         obj.sensitivity, obj.resolution = Value('高'), Value('1280×720')
         obj.display_size, obj.camera_index = Value('明显 360×280'), Value('0')
         obj.paused = obj.closing = obj.adjusting = obj.demo_bar = obj.bar_shown = False
