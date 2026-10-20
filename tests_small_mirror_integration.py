@@ -630,17 +630,16 @@ class Tests(unittest.TestCase):
             self.assertFalse(obj.observe_packet(packet,now))
         obj.show_mask.assert_not_called();self.assertEqual(obj.stats.total,0)
 
-    def test_automatic_cover_rearms_after_restore_before_two_second_visit_gap(self):
+    def test_automatic_cover_rearms_after_two_seconds_away(self):
         obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
         obj.has_protection=lambda:True;starts=[]
         def show(automatic=False):
             starts.append(automatic);obj.mask_active=True;obj.auto_mask=automatic
         obj.show_mask=show
-        for serial,now,present in ((1,0,True),(2,.31,True),(3,.5,False),(4,1.71,False)):
+        for serial,now,present in ((1,0,True),(2,.31,True),(3,.5,False),(4,1.5,False),(5,2.51,False)):
             obj.process_protection(self.observer_packet(serial,now,present=present),now)
         self.assertEqual(starts,[True]);self.assertFalse(obj.mask_active)
-        # The observer comes back before the statistics gate's two-second gap.
-        for serial,now in ((5,1.8),(6,2.11)):
+        for serial,now in ((6,2.6),(7,2.91)):
             obj.process_protection(self.observer_packet(serial,now),now)
         self.assertEqual(starts,[True,True]);self.assertTrue(obj.mask_active)
 
@@ -669,7 +668,7 @@ class Tests(unittest.TestCase):
         for now in (0,1.3,10):
             obj.process_protection(self.core.FacePacket(error='Camera unavailable'),now)
             self.assertTrue(obj.mask_active)
-        for serial,now in ((1,10.1),(2,11.31)):
+        for serial,now in ((1,10.1),(2,11.1),(3,12.11)):
             obj.process_protection(self.observer_packet(serial,now,present=False),now)
         self.assertFalse(obj.mask_active)
 
@@ -711,14 +710,47 @@ class Tests(unittest.TestCase):
         self.assertFalse(obj.bar_shown);self.assertIsNone(obj.bar_image)
         self.assertIsNone(obj.performer_started_at)
 
-    def test_performer_on_mask_uses_protection_wording_and_suppresses_duplicate_float(self):
+    def test_performer_stays_in_independent_float_and_only_raises_on_mask_change(self):
         obj,calls=self.performer_app();obj.masks=[Resource()];obj.bar_shown=True
         obj.mask_active=True;obj.coverage_expected=1;obj.coverage_checked=1;obj.coverage_errors=[]
         obj.paint_mask_frames=MagicMock(return_value=True)
-        with patch.object(self.app.time,'monotonic',return_value=5):
-            obj.show_bar(self.observer_packet(1,5))
-        self.assertTrue(calls[-1][3]);obj.paint_mask_frames.assert_called_once()
-        self.assertFalse(obj.bar_shown);self.assertIn('withdraw',obj.bar.calls)
+        obj.bar_needs_raise=True
+        with patch.object(self.app.time,'monotonic',return_value=5), \
+             patch.object(self.core.ImageTk,'PhotoImage',lambda image:object()), \
+             patch.object(self.app,'configure_floating_window') as position:
+            obj.show_bar(self.observer_packet(1,5));obj.show_bar(self.observer_packet(2,5.1))
+        self.assertTrue(calls[-1][3]);obj.paint_mask_frames.assert_not_called()
+        self.assertTrue(obj.bar_shown);self.assertNotIn('withdraw',obj.bar.calls)
+        position.assert_called_once()
+
+    def test_manual_uncover_reacquires_same_person_after_snooze_without_recounting(self):
+        obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
+        obj.has_protection=lambda:True
+        def show(automatic=False):obj.mask_active=True;obj.auto_mask=automatic
+        obj.show_mask=MagicMock(side_effect=show)
+        for serial,t in ((1,0),(2,.31),(3,.6)):
+            packet=self.observer_packet(serial,t);obj.observe_packet(packet,t);obj.process_protection(packet,t)
+        self.assertTrue(obj.mask_active);self.assertEqual(obj.stats.total,1)
+        with patch.object(self.app.time,'monotonic',return_value=1):obj.toggle_mask()
+        self.assertFalse(obj.mask_active)
+        for serial,t in enumerate((2,10,20,30.9,31,31.31),4):
+            packet=self.observer_packet(serial,t);obj.observe_packet(packet,t);obj.process_protection(packet,t)
+            if t<31.3:self.assertFalse(obj.mask_active)
+        self.assertTrue(obj.mask_active);self.assertEqual(obj.stats.total,1)
+        self.assertEqual(obj.show_mask.call_count,2)
+
+    def test_turn_away_releases_cover_but_unknown_pose_does_not(self):
+        obj=self.make_app();obj.rois=[(0,0,1,1)];obj.sensitive.set(True)
+        obj.has_protection=lambda:True;obj.mask_active=True;obj.auto_mask=True
+        obj.attention_required.set(True)
+        for serial,t in ((1,0),(2,1),(3,2.1)):
+            packet=self.observer_packet(serial,t);packet.faces[0]['row']=None
+            obj.process_protection(packet,t)
+        self.assertTrue(obj.mask_active)
+        for serial,t in ((4,3),(5,4),(6,5.1)):
+            packet=self.observer_packet(serial,t);packet.faces[0]['row'][8]=134
+            obj.process_protection(packet,t)
+        self.assertFalse(obj.mask_active)
 
     def test_recording_gets_clean_observer_crop_with_performer_and_effects_selected(self):
         obj,calls=self.performer_app();obj.record_enabled.set(True)
@@ -730,5 +762,21 @@ class Tests(unittest.TestCase):
         np.testing.assert_array_equal(crops[0],obj.clean_observer_crop(packet))
         np.testing.assert_array_equal(packet.frame,original)
         self.assertEqual(calls,[])
+
+    def test_partial_observer_is_displayed_and_recorded_instead_of_hidden_on_overlap(self):
+        obj,calls=self.performer_app();obj.record_enabled.set(True)
+        packet=self.observer_packet(1,5);packet.owner_boxes=[(65,50,50,50)]
+        packet.private_boxes=list(packet.owner_boxes);original=packet.frame.copy()
+        crop=obj.clean_observer_crop(packet)
+        self.assertIsNotNone(crop);self.assertLess(crop.shape[1],64)
+        crops=[];obj.recorder.feed=lambda image,*args:crops.append(image)
+        obj.process_recording(packet,5,True)
+        with patch.object(self.core.ImageTk,'PhotoImage',lambda image:object()), \
+             patch.object(self.app,'configure_floating_window'):
+            obj.show_bar(packet)
+        self.assertTrue(obj.bar_shown);self.assertIsNotNone(calls[-1][0])
+        np.testing.assert_array_equal(crops[0],crop)
+        np.testing.assert_array_equal(calls[-1][0],self.core.cv2.cvtColor(crop,self.core.cv2.COLOR_BGR2RGB))
+        np.testing.assert_array_equal(packet.frame,original)
 
 if __name__ == '__main__': unittest.main(verbosity=2)

@@ -5,7 +5,7 @@
 [![Windows checks](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml/badge.svg)](https://github.com/Jackied123456/Crazy---KuiZei/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-52745B.svg)](LICENSE)
 ![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-52745B.svg)
-![Status: Beta](https://img.shields.io/badge/Status-v13.6%20Beta-777777.svg)
+![Status: Beta](https://img.shields.io/badge/Status-v13.7.1%20Beta-777777.svg)
 
 ## 忍了很久，最后还是打开了编辑器
 
@@ -98,15 +98,29 @@ TA还在看。
 
 一个在 Windows 本机运行的屏幕哨兵：检测后方观察者、尝试排除本人，按需遮挡指定窗口，并用动态相框提醒围观者。
 
-> v13.6 Beta · MIT 开源代码 · 本地运行。公开发行包不附带第三方人物 GIF，默认使用原创哨兵；可在设置中导入有权使用的本地素材。
+> v13.7.1 Beta · Windows 运行包已内置药水哥 12 个动图，下载即可使用；识别与录像在本机进行。MIT 适用于本项目代码，人物素材与模型分别说明。
 
 [快速开始](#运行) · [隐私说明](PRIVACY.md) · [贡献代码](CONTRIBUTING.md) · [报告问题](https://github.com/Jackied123456/Crazy---KuiZei/issues/new/choose) · [更新记录](CHANGELOG.md)
 
-![窥贼 v13.6 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.6.0-beta.1/Crazy-v13.6-Beta-UI.png?preview=1)
+![窥贼 v13.7.1 Beta 主页：相机关闭、尚未录入本人](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.7.1-beta.1/Crazy-v13.7.1-Beta-UI.png)
 
 ## 下载
 
-Windows 用户可以前往 [v13.6 Beta 下载页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v13.6.0-beta.1)，下载 `Crazy-v13.6-Beta-Windows.zip`，解压后运行 `Crazy-v13.6-Beta.exe`，无需单独安装 Python。请先从托盘退出旧版。下载校验值见同页 `SHA256SUMS.txt`。从源码运行的步骤见下文。
+Windows 用户请下载 [**Crazy-v13.7.1-Beta-Windows.zip（内置药水哥）**](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.7.1-beta.1/Crazy-v13.7.1-Beta-Windows.zip)，或者进入 [v13.7.1 Beta 发布页](https://github.com/Jackied123456/Crazy---KuiZei/releases/tag/v13.7.1-beta.1)，在 **Assets** 中选择同名文件。
+
+先从托盘退出旧版，完整解压后运行 `Crazy-v13.7.1-Beta.exe`，无需安装 Python，也无需额外导入药水哥动图。`Source code` 和 `source.zip` 是供开发者使用的源码，里面没有 EXE。下载校验值见同页 `SHA256SUMS.txt`。
+
+## v13.7.1 的改进
+
+- 人物重叠时保留观察者可见的局部，不再整块隐藏特写。优先保留完整脸；无法分开时显示露出的部分，本人区域继续排除。录像使用同一份局部画面，身份和朝向判断不放宽。
+
+- 手动恢复内容后，默认 30 秒内不再自动遮挡；可选择 1 分钟、5 分钟或立即恢复。监测仍继续，恢复后依靠新的有效画面重新判断，同一次围观不重复计次。
+- 默认面朝屏幕约 1 秒触发；确认转开或离开约 2 秒后恢复。相机中断、重复画面、朝向不明时不会据此揭开内容。
+- 药水哥与观察者使用独立置顶相框，内容遮罩保持独立。未确认的人物不显示、不录像；相机关闭时可以测试遮挡与本地动画。
+- 窗口列表支持跨页全选、取消全选；首页集中测试遮挡（3 秒后恢复）、立即遮挡/恢复内容与自动遮挡开关。
+- Windows 运行包内置 12 个药水哥 GIF，保留已调好的 6 组节目、18 个段落和 3 种台词风格。源码归档继续不携带人物 GIF 或个人数据。
+
+![药水哥动态相框效果预览：未连接相机，不展示用户人像](https://github.com/Jackied123456/Crazy---KuiZei/releases/download/v13.7.1-beta.1/Crazy-v13.7.1-Beta-performer.png)
 
 ## v13.6 的操作与流畅度改进
 
@@ -122,7 +136,7 @@ Windows 用户可以前往 [v13.6 Beta 下载页](https://github.com/Jackied1234
 - 启动、关闭和错误提示完整替换，按实际文字高度排列；录入指引修正深色对比度，失败后可以重试。
 - 更新异常会暂停并提示，保留后续界面更新；已遮挡内容保持遮挡，等待用户主动恢复。
 
-已通过 186 项程序测试（185 通过，1 项因公开源码不包含可选人物 GIF 而跳过）、独立 EXE 检查及不同窗口状态检查。在实际 Windows 最大化窗口下，用模拟视频验证了连续刷新、收起与展开、断流清除和重试流程；这些结果不能替代对具体摄像头驱动和工位环境的实测。
+本次在带 12 个动图的本地构建中通过 202 项程序测试；公开源码未附带 GIF 时，其中 1 项素材完整性检查会跳过，其余检查继续执行。另通过发布检查、独立 EXE 检查及不同窗口状态检查。在实际 Windows 最大化窗口下，用模拟视频验证了连续刷新、收起与展开、断流清除和重试流程；这些结果不能替代对具体摄像头驱动和工位环境的实测。
 
 ## v13 的检测与显示改进
 
@@ -130,7 +144,7 @@ Windows 用户可以前往 [v13.6 Beta 下载页](https://github.com/Jackied1234
 - 同一画面已认出本人时，明显分开的第二张脸也能作为额外入镜人物，不再必须靠清晰的大脸完成身份核对；本人不在画面或人物重叠时继续等待核对。
 - 已核对的非本人允许至多 0.8 秒短暂模糊，出现身份冲突或交叉时重新确认。
 - 遮罩已显示且位置、层级未变时不重复显示或定位；预览保留画布，只随新画面更新，减少覆盖其他窗口时的闪动。
-- 人物特写若与受保护人脸重叠，显示“人物重叠，暂不显示特写”；动态角色可继续播放，该裁剪不会进入录像。
+- 人物特写与受保护人脸重叠时，优先显示观察者露出的局部；确实没有可分离的脸部像素时，保留遮住本人区域后的实时裁剪。本人及尚未核对的人脸不进入投射或录像。
 
 此前的指引与检测改进也保留：
 
@@ -163,10 +177,10 @@ py -3.12 -m venv .venv
 
 1. 点击“开始保护”，相机会自动打开并展开画面。首次使用会进入本人录入指引：确认画面里是你，跟着圆环转头，验证通过后点“保存并完成”，即可继续监测。也可单独从“认识我”一栏进入录入。
 2. 点“设置检测区”调整后方范围。拖边缘或四角缩放、框内拖动可移动；点“新增框”或按住 Shift 拖动可新增多个框，完成后点“完成”。
-3. 点“选择窗口”，选好需要遮挡的内容，再点“试遮挡”确认覆盖效果。未选择时仅监测，不代表内容已经遮挡。
-4. 不想一直看视频时点“收起画面”，后台监测继续；“展开画面”恢复显示。“暂停保护”才会停止监测并关闭相机。动画预览与动作选择在“设置 → 动画与台词”中。
+3. 点“选择窗口”，选好需要遮挡的内容，再点“测试遮挡”确认覆盖效果（3 秒后自动恢复）。未选择时仅监测，不代表内容已经遮挡。
+4. 不想一直看视频时点“收起画面”，后台监测继续；“展开画面”恢复显示。“暂停保护”才会停止监测并关闭相机。动作与台词可从首页“药水哥设置”选择；相框位置与大小在“设置 → 显示”中调整。
 
-双击遮罩或按 `Ctrl+Alt+H` 恢复内容。窗口绑定只在当前会话有效，重启后需要重新选择。
+双击遮罩或按 `Ctrl+Alt+H` 恢复内容，默认暂缓自动遮挡 30 秒；浮动提示可改成 1 分钟、5 分钟或立即恢复。监测继续，到期后依据新画面重新判断。窗口绑定只在当前会话有效，重启后需要重新选择。
 
 ## 限制
 
@@ -184,17 +198,19 @@ py -3.12 -m venv .venv
 
 本人特征使用 Windows DPAPI 加密。录像是本地普通 AVI 文件，没有额外加密；当前 Windows 账户或有相应磁盘权限的程序可能读取它。见 [隐私说明](PRIVACY.md)。
 
-Windows 发行程序为 `Crazy-v13.6-Beta.exe`。
+Windows 发行程序为 `Crazy-v13.7.1-Beta.exe`，药水哥动图已内置。
 
 本人模板是本机录入后才产生的独立文件，不在源码或发行包里；`models/` 的 YuNet / SFace 是所有用户共用的预训练模型，不是作者或其他使用者的人像资料。公开 GitHub 仓库会展示代码提交历史，但不会自动收集本机文件、摄像头画面或开发对话。
 
 ## 检查与构建
 
 ```powershell
-.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media tests_small_mirror_reliability tests_small_mirror_ui
+.\.venv\Scripts\python -m unittest tests_small_mirror_core tests_small_mirror_identity tests_small_mirror_integration tests_small_mirror_shell tests_small_mirror_windows tests_small_mirror_v7 tests_small_mirror_performer tests_small_mirror_media tests_small_mirror_reliability tests_small_mirror_ui tests_small_mirror_protection
 .\.venv\Scripts\python small_mirror.py --self-test
 .\.venv\Scripts\python -m pip install pyinstaller==6.22.3
-.\.venv\Scripts\python tools/build_windows.py
+.\.venv\Scripts\python tools/build_windows.py --media-dir PATH_TO_GIFS
+# 仅开发调试、明确不用人物素材时：
+.\.venv\Scripts\python tools/build_windows.py --original-sentry
 ```
 
 上述自动化检查不需要真实摄像头；图像和录像测试使用合成像素。没有可选 GIF 时，相应素材完整性检查会明确跳过，其余时序和原创哨兵检查仍会执行。
@@ -203,7 +219,7 @@ Windows 发行程序为 `Crazy-v13.6-Beta.exe`。
 
 ## 本地素材
 
-Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.json` 必须与内置节目配置一致。附带目录不会进入公开包，已导入的本地素材优先。“删除导入素材”会停用附带目录，不删除目录原件；重新导入即可启用。
+Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.json` 必须与内置节目配置一致。v13.6 的公开包不带人物素材；v13.7.1 运行包将 12 个指定动图内置在 EXE，已导入的本地素材仍优先。“删除导入素材”会停用附带目录，不删除目录原件；重新导入即可启用。
 
 在“设置 → 动画与台词”选择“导入本地动图”，选择装有 GIF 的文件夹。可只准备部分动作；文件名与 slots 如下。
 
@@ -222,11 +238,11 @@ Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.js
 | `red-barrage.gif` | 连续回敬 |
 | `covered-giggle.gif` | 忍笑 |
 
-单个 GIF 最多 20 MB、300 帧、200 万像素；整组最多 60 MB，并限制解码后的总帧像素。文件内容在后台检查，只导入已知文件名，用户提供的节目配置不会被导入。导入内容保存在独立本地数据目录，公开构建始终不携带这些文件。“删除导入素材”恢复本版本内置动画（公开版为原创哨兵），不删除本人模板、设置和录像。只导入你有权使用的内容。
+单个 GIF 最多 20 MB、300 帧、200 万像素；整组最多 60 MB，并限制解码后的总帧像素。文件内容在后台检查，只导入已知文件名，用户提供的节目配置不会被导入。导入内容保存在独立本地数据目录，构建不会扫描或打包用户数据目录，只读取明确指定的素材输入。“删除导入素材”恢复本版本内置动画（v13.6 公开版为原创哨兵，v13.7.1 运行包为内置人物动图），不删除本人模板、设置和录像。只导入你有权使用的内容。
 
 ## 素材与许可
 
-公开目录只保留原创程序绘制的默认动画和通用模型。YuNet 模型附带 MIT 许可，SFace 模型附带 Apache-2.0 许可；这些模型是通用权重，不是某个用户的人脸模板。
+源码归档只保留原创程序绘制的默认动画和通用模型；v13.7.1 运行 EXE 另含明确选定的人物 GIF。YuNet 模型附带 MIT 许可，SFace 模型附带 Apache-2.0 许可；这些模型是通用权重，不是某个用户的人脸模板。
 
 人物 GIF 不属于本项目代码许可，不能因为网上可见就视作获准分发。可选本地素材目录被 `.gitignore` 排除；素材来源链接也不构成授权证明。
 
@@ -251,7 +267,7 @@ Windows 程序支持 EXE 同目录的 `Crazy-local-media/`；其中 `programs.js
 
 **为什么本人也可能被框出来？** 请先完成“认识我”，并在实际工位光线下预览验证。本人排除与头部朝向筛选都可能误判，不能把提示当作窥屏行为的事实认定。
 
-**为什么看不到人物动图？** 公开版默认显示原创哨兵。可在设置中导入有权使用的本地 GIF，具体文件名见上表。
+**为什么看不到药水哥？** 请下载本页 v13.7.1 的 `Windows.zip`，解压运行其中的 EXE，药水哥已内置。若沿用了旧版的普通特写偏好，请在“设置 → 显示”切换为“动态相框”。源码包不附带人物 GIF，从源码运行时默认使用原创哨兵；开发者可以自行准备素材，具体文件名见上表。
 
 **支持 macOS / Linux 吗？** 当前界面和保护窗口依赖 Windows 原生 API，尚未支持其他平台。
 

@@ -25,9 +25,10 @@ from event_stats_v4 import EventSessionGate, StatsStore, StatsDataError
 from small_mirror_shell import NativeTray, GlobalHotkey, configure_floating_window
 from small_mirror_identity import OwnerStore, POSES
 from small_mirror_effects import EFFECTS,deform,draw_bugs
-from small_mirror_attention import facing_screen, FacingTimer
+from small_mirror_attention import facing_screen, face_pose, FacingTimer
+from small_mirror_protection import ProtectionPolicy
 from small_mirror_recording import EventRecorder
-from small_mirror_panels import WindowPicker,RecordingsPanel
+from small_mirror_panels import WindowPicker,RecordingsPanel,CoverSnooze
 from small_mirror_performer import (PerformerFrameRenderer, MOTIONS, PHRASES, DEFAULT_MOTIONS,
     DEFAULT_PHRASES, normalize_choices, forget_media_libraries)
 from small_mirror_performer_panel import PerformerPanel
@@ -221,6 +222,7 @@ class PrivacyApp:
         self.custom_bar_size = self.config.get('bar_size')
         self.masks = []
         self.mask_active=False;self.auto_mask=False;self.protection_absent_since=None
+        self.cover_policy=ProtectionPolicy();self.cover_notice=None;self.test_cover_until=0.;self.bar_needs_raise=False
         self.coverage_errors=[];self.coverage_expected=0;self.coverage_checked=0
         self.protected_windows=[];self.protected_masks={}
         self.window_api=None;self.window_picker=None;self.recordings_panel=None
@@ -267,7 +269,7 @@ class PrivacyApp:
         self.root.minsize(min(round(680*self.ui_scale), window_width), min(round(620*self.ui_scale), window_height))
         self.root.configure(bg=self.BG)
         self.root.protocol('WM_DELETE_WINDOW', lambda: self.hide_settings() if self.tray else self.close())
-        self.root.bind('<Escape>', lambda _e: self.restore())
+        self.root.bind('<Escape>', lambda _e: self.manual_restore())
         self.build_ui()
         # Static local media decodes away from Tk's event loop. No camera or
         # observer pixels enter this loader; protection can respond meanwhile.
@@ -424,7 +426,7 @@ class PrivacyApp:
         self.size_picker=picker
         picker.pack(side='left', padx=(0, 10))
         picker.bind('<<ComboboxSelected>>', lambda _e:self.change_crop())
-        ttk.Button(size_row, text='调整窗口', command=self.adjust_bar).pack(side='left')
+        ttk.Button(size_row, text='相框位置与大小', command=self.adjust_bar).pack(side='left')
         effects_row=ttk.Frame(display);effects_row.pack(fill='x',pady=(0,12))
         ttk.Label(effects_row,text='回敬效果').pack(side='left',padx=(0,10))
         effects_picker=ttk.Combobox(effects_row,textvariable=self.effect,values=EFFECTS,state='readonly',width=14)
@@ -432,11 +434,10 @@ class PrivacyApp:
         ttk.Label(effects_row,text='小虫子').pack(side='left',padx=(0,8))
         bugs_picker=ttk.Combobox(effects_row,textvariable=self.bugs,values=('关闭','特写里','保护遮罩上'),state='readonly',width=12)
         bugs_picker.pack(side='left');bugs_picker.bind('<<ComboboxSelected>>',lambda _e:self.save_config())
-        ttk.Checkbutton(display,text='面朝屏幕约 1 秒后才回敬、录像（近似判断）',variable=self.attention_required,
+        ttk.Checkbutton(display,text='面朝屏幕约 1 秒后遮挡、回敬和录像（近似判断）',variable=self.attention_required,
                         command=self.update_settings).pack(anchor='w',pady=(0,12))
-        ttk.Checkbutton(display, text='显示识别调试信息', variable=self.debug,
+        ttk.Checkbutton(display, text='检测诊断（高级）', variable=self.debug,
                         command=self.save_config).pack(anchor='w', pady=(0, 14))
-        ttk.Button(display, text='统计与成就', command=self.open_stats).pack(anchor='w')
         ttk.Label(display, text='检测到观察者时持续显示；离开画面后收起。',
                   foreground=self.MUTED).pack(anchor='w', pady=(18,0))
         ttk.Label(display,text='调整时可拖动边缘缩放，双击完成。',foreground=self.MUTED).pack(anchor='w',pady=(8,0))
@@ -457,16 +458,15 @@ class PrivacyApp:
         ttk.Label(camera,text='暂停后可更换相机或分辨率。',foreground=self.MUTED).pack(anchor='w')
         ttk.Label(camera,textvariable=self.detector_var,foreground=self.MUTED,
                   wraplength=530*self.ui_scale).pack(anchor='w',pady=(14,0))
-        ttk.Checkbutton(protection,text='敏感内容自动遮挡',variable=self.sensitive,
-                        command=self.sensitive_changed).pack(anchor='w',pady=(0,14))
         row3=ttk.Frame(protection);row3.pack(fill='x',pady=(0,14))
         ttk.Button(protection,text='选择要保护的窗口',command=self.open_window_picker).pack(anchor='w',pady=(0,12))
-        for label,callback in (('添加固定区域',self.select_protect_region),('撤销',self.undo_protect_region),
-                               ('清空',self.clear_protect_regions),('遮挡／恢复',self.toggle_mask)):
+        for label,callback in (('添加固定区域',self.select_protect_region),('撤销固定区域',self.undo_protect_region),
+                               ('清空固定区域',self.clear_protect_regions)):
             ttk.Button(row3,text=label,command=callback).pack(side='left',padx=(0,8))
         ttk.Label(protection,textvariable=self.region_var,foreground=self.MUTED).pack(anchor='w')
         ttk.Label(protection,text='Ctrl+Alt+H 同时遮挡／恢复全部保护区。',foreground=self.MUTED).pack(anchor='w',pady=(14,0))
-        ttk.Button(protection,text='试遮挡／恢复',command=self.test_protection).pack(anchor='w',pady=(14,0))
+        ttk.Label(protection,text='测测试遮挡、立即遮挡与自动遮挡开关已集中在首页“保护窗口”。',
+                  foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(14,0))
         ttk.Label(protection,textvariable=self.protection_summary,foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(12,0))
         ttk.Label(performer,text='动画与台词',font=('Microsoft YaHei UI',16,'bold')).pack(anchor='w')
         ttk.Label(performer,text='看看触发后的相框。预览不会遮挡窗口、计次或录像。',foreground=self.MUTED,wraplength=520*self.ui_scale).pack(anchor='w',pady=(8,10))
@@ -580,37 +580,73 @@ class PrivacyApp:
             self.recordings_panel.window.lift();return
         self.recordings_panel=RecordingsPanel(self)
 
-    def process_protection(self,packet,now):
-        # Do not consume the one-per-visit trigger before protection is enabled.
-        # A user may select a window while the same observer is still present.
-        if not self.sensitive.get() or not self.has_protection():
-            self.protection_gate.reset();self.protection_serial=-1
-            return
-        # No fresh image is not evidence that an observer left. Keep an existing
-        # automatic cover until valid camera frames establish an actual absence.
+    def protection_policy(self):
+        if not hasattr(self,'cover_policy'):self.cover_policy=ProtectionPolicy()
+        return self.cover_policy
+
+    def protection_signal(self,packet):
         trustworthy=(packet.frame is not None and packet.ready and packet.identity_ready and not packet.error
                      and not self.paused and not self.enrolling and not self.owner_verifying and bool(self.owner_samples))
-        if not trustworthy:
-            self.protection_absent_since=None
-            return
-        present=self.valid_observer(packet)
+        if not trustworthy:return None
         height,width=packet.frame.shape[:2]
-        # An uncertain identity is not absence. Cover content while verification
-        # catches up, but never use that face for a close-up or a recording.
-        present=present or any(item.get('identity') not in ('owner','unregistered')
-            and item.get('detection_accepted',item.get('protection_candidate',False))
-            and core.matching_region(item['bbox'],width,height,self.rois) is not None
-            for item in packet.faces)
-        if present:self.protection_absent_since=None
-        elif self.protection_absent_since is None:self.protection_absent_since=now
-        if self.auto_mask and self.protection_absent_since is not None and now-self.protection_absent_since>=1.2:
-            self.restore()
-            # Auto-restoring content must also rearm protection for a quick return.
-            self.protection_gate.reset();self.protection_serial=-1
-        if packet.serial==self.protection_serial and packet.frame is not None:return
-        self.protection_serial=packet.serial
-        if self.protection_gate.observe(now,present):
-            if self.sensitive.get() and self.has_protection():self.show_mask(automatic=True)
+        candidates=[item for item in packet.faces if item.get('identity') not in ('owner','unregistered')
+            and (item.get('detection_accepted',item.get('protection_candidate',False))
+                 or self.valid_observer(packet) and item['bbox']==packet.face)
+            and core.matching_region(item['bbox'],width,height,self.rois) is not None]
+        # Synthetic/legacy packets may supply only the already-verified face.
+        if self.valid_observer(packet) and not candidates and not packet.faces:
+            return True if not self.attention_required.get() else None
+        if not candidates:return False
+        if not self.attention_required.get():return True
+        unknown=False
+        for item in candidates:
+            if facing_screen(item):return True
+            pose=face_pose(item.get('row'))
+            if pose is None:unknown=True
+            else:
+                yaw,pitch=pose
+                if not (abs(yaw)>.45 or pitch<.12 or pitch>1.05):unknown=True
+        return None if unknown else False
+
+    def process_protection(self,packet,now):
+        policy=self.protection_policy()
+        # Test masks have their own lifetime and never become observer visits.
+        if getattr(self,'test_cover_until',0):
+            if now>=self.test_cover_until:self.restore()
+            else:return
+        notice=getattr(self,'cover_notice',None)
+        remaining=policy.remaining(now)
+        if notice:
+            if remaining:notice.update(remaining)
+            else:notice.dismiss()
+        if not self.sensitive.get() or not self.has_protection():
+            policy.reset();return
+        action=policy.update(now,packet.serial,self.protection_signal(packet),
+                             self.mask_active,self.auto_mask,self.attention_required.get())
+        if action=='cover':self.show_mask(automatic=True)
+        elif action=='uncover':self.restore()
+
+    def snooze_protection(self,seconds=30):
+        self.protection_policy().release(time.monotonic(),seconds)
+        self.update_protection_summary()
+        notice=getattr(self,'cover_notice',None)
+        if notice:notice.update(seconds)
+
+    def manual_restore(self):
+        if not self.mask_active:return
+        self.restore()
+        self.snooze_protection(30)
+        self.detail_var.set('内容已恢复，30 秒内不再自动遮挡。监测和围观统计继续。')
+        if getattr(self,'cover_notice',None) is None and isinstance(self.root,tk.Misc):
+            self.cover_notice=CoverSnooze(self)
+            self.cover_notice.update(30)
+
+    def resume_protection(self):
+        # Resume only arms fresh acquisition; it does not reuse the last face.
+        self.protection_policy().release(time.monotonic(),0)
+        if getattr(self,'cover_notice',None):self.cover_notice.dismiss()
+        self.detail_var.set('自动遮挡已恢复，正在等待新的有效画面。')
+        self.update_protection_summary()
 
     def open_window_picker(self):
         if self.window_picker is not None:self.window_picker.window.lift();return
@@ -637,7 +673,7 @@ class PrivacyApp:
     def make_mask(self,region,target=None):
         mask=tk.Toplevel(self.root);mask.withdraw();mask.overrideredirect(True);mask.configure(bg=self.BG)
         canvas=tk.Canvas(mask,bg=self.BG,highlightthickness=0);canvas.pack(fill='both',expand=True)
-        canvas.bind('<Double-Button-1>',lambda _e:self.restore())
+        canvas.bind('<Double-Button-1>',lambda _e:self.manual_restore())
         mask._canvas=canvas;mask._bounds=tuple(region);mask._target=target
         x,y,w,h=region
         canvas.create_text(w/2,h/2,text='内容已遮挡\n双击这里，或按 Ctrl+Alt+H 恢复',fill=self.MUTED,
@@ -647,6 +683,7 @@ class PrivacyApp:
         mask.deiconify();configure_floating_window(mask,click_through=False,no_activate=True)
         if target:self.window_api.cover(mask,target,region)
         self.masks.append(mask)
+        self.bar_needs_raise=True
         return mask
 
     def protection_confirmed(self):
@@ -657,29 +694,32 @@ class PrivacyApp:
     def update_protection_summary(self):
         if not hasattr(self,'protection_summary'):return
         errors=getattr(self,'coverage_errors',[])
+        remaining=self.protection_policy().remaining(time.monotonic())
         if self.mask_active and errors:
             text='遮挡异常 · '+errors[0]
         elif self.protection_confirmed():
             text='已遮挡 · '+('监测中断，保持遮挡' if getattr(self,'camera_fault',False) or self.paused and self.auto_mask else '双击遮罩或按 Ctrl+Alt+H 恢复')
         elif self.mask_active:text='等待保护窗口显示 · 尚未确认遮挡'
+        elif remaining:text=f'暂缓自动遮挡 · {remaining} 秒后恢复（监测继续）'
         elif not self.owner_samples and not self.mask_active:text='首次使用 · 点击开始保护，跟着指引录入本人'
         elif not self.has_protection():text='可先开始监测，选择窗口后可遮挡内容' if self.paused else '仅监测 · 未设置内容遮挡'
-        elif self.paused:text='待开启 · 已选窗口，先试遮挡'
+        elif self.paused:text='待开启 · 已选窗口，先测试遮挡'
         elif not self.owner_samples:text='待录入本人 · 自动遮挡尚未开启'
-        elif not self.sensitive.get():text='自动遮挡关闭 · 可手动试遮挡'
+        elif not self.sensitive.get():text='自动遮挡关闭 · 可手动测试遮挡'
         elif not self.rois:text='未设置检测区 · 自动遮挡尚未开启'
         else:text='监测中 · 等待后方目标'
         self.protection_summary.set(text)
-        if getattr(self,'test_mask_button',None):self.test_mask_button.configure(text='恢复内容' if self.mask_active else '试遮挡')
+        if getattr(self,'manual_mask_button',None):self.manual_mask_button.configure(text='恢复内容' if self.mask_active else '立即遮挡')
+        if getattr(self,'test_mask_button',None):self.test_mask_button.configure(state='disabled' if self.mask_active else 'normal')
 
     def test_protection(self):
-        if self.mask_active:
-            self.restore();self.detail_var.set('内容已恢复。自动遮挡按当前开关继续等待检测。')
-        elif not self.has_protection():
-            self.open_window_picker();self.detail_var.set('先选择一个窗口，再点“试遮挡”。这一步不需要相机。')
+        if self.mask_active:return
+        if not self.has_protection():
+            self.open_window_picker();self.detail_var.set('先选择窗口，再点“测测试遮挡”。这一步不需要相机。')
         else:
             self.show_mask(automatic=False)
-            self.detail_var.set('请确认选定窗口的内容已完全遮住。双击遮罩或按 Ctrl+Alt+H 恢复。' if self.protection_confirmed() else '尚未确认遮挡成功，请查看保护状态。')
+            self.test_cover_until=time.monotonic()+3
+            self.detail_var.set('正在测测试遮挡，3 秒后自动恢复。测试不会计次或录像。')
         self.update_protection_summary()
 
     def sync_window_masks(self,now):
@@ -710,6 +750,7 @@ class PrivacyApp:
                         mask=self.make_mask(bounds,token);self.protected_masks[key]=mask
                     elif mask.state()=='withdrawn':
                         mask.deiconify()
+                        self.bar_needs_raise=True
                         # Tk remaps a withdrawn native wrapper. Reapply its
                         # overlay styles once, then cover() demotes and orders
                         # it relative to the source before the next paint.
@@ -726,7 +767,7 @@ class PrivacyApp:
                         if okay:okay=self.window_api.verify_cover(mask,token,bounds)
                         mask._repair_failed_state=None if okay else repair_state
                     if okay:self.coverage_checked+=1
-                    else:self.coverage_errors.append('未能覆盖所选窗口，请试遮挡确认')
+                    else:self.coverage_errors.append('未能覆盖所选窗口，请测试遮挡确认')
                     x,y,w,h=bounds;mask._bounds=bounds
                     mask._canvas.coords('message',w/2,h/2)
                     mask._canvas.itemconfigure('message',width=max(40,w-20))
@@ -899,8 +940,8 @@ class PrivacyApp:
         resume=getattr(self,'resume_after_enrollment',False)
         if resume:self.owner_camera_was_paused=False
         self.cancel_enrollment()
-        self.detail_var.set('已经认识你，正在监测。可选择需要遮挡的窗口，并点“试遮挡”。' if resume else
-                            '已经认识你了。选择保护窗口，点“试遮挡”，再开始保护。')
+        self.detail_var.set('已经认识你，正在监测。可选择需要遮挡的窗口，并点“测试遮挡”。' if resume else
+                            '已经认识你了。选择保护窗口，点“测试遮挡”，再开始保护。')
 
     def cancel_enrollment(self):
         self.resume_after_enrollment=False
@@ -1278,6 +1319,8 @@ class PrivacyApp:
             self.show_bar(packet, force_placeholder=True)
         elif show_observer:
             self.show_bar(packet)
+        elif self.mask_active and self.using_performer():
+            self.show_bar(packet,force_placeholder=True,performer_only=True)
         elif self.keep_performer_during_miss(packet,now):
             self.show_bar(packet,force_placeholder=True,performer_only=True)
         elif self.demo_bar and now < self.bar_until:
@@ -1648,7 +1691,7 @@ class PrivacyApp:
             now=time.monotonic()
             item=next((item for item in packet.faces if item['bbox']==packet.face),{})
             target=('demo' if self.demo_bar or self.adjusting else
-                    self.performer_target if performer_only else item.get('track_id','observer'))
+                    (self.performer_target or 'cover') if performer_only else item.get('track_id','observer'))
             if self.performer_started_at is None or self.performer_target!=target:
                 self.performer_started_at=now;self.performer_target=target
             if self.performer_renderer is None:self.performer_renderer=PerformerFrameRenderer(getattr(self,'active_media_dir',performer_asset_dir()),
@@ -1657,13 +1700,14 @@ class PrivacyApp:
             protected=not(self.demo_bar or self.adjusting) and self.protection_confirmed()
             image=self.performer_renderer.render(rgb,(width,height),now-self.performer_started_at,protected=protected)
             if overlap_hidden or performer_only:
-                # Keep the local performer running while withholding a portrait
-                # that would expose the owner or display a partially black face.
+                # Keep the local performer running when no verified live crop
+                # exists. Geometric overlap itself now retains visible pixels.
                 from PIL import ImageDraw
                 layout=self.performer_renderer._layout((width,height))
                 box=layout['observer'];draw=ImageDraw.Draw(image)
                 draw.rounded_rectangle(box,12,fill=self.PANEL)
-                note='画面短暂丢失\n正在重新确认' if performer_only else '人物重叠\n暂不显示特写'
+                note=('等待观察者\n仅显示已确认的后方人物' if self.paused or getattr(self,'test_cover_until',0) else
+                      '正在确认\n人物画面已暂隐') if performer_only else '暂无有效画面\n正在确认'
                 draw.text(((box[0]+box[2])/2,(box[1]+box[3])/2),note,
                           anchor='mm',align='center',fill=self.MUTED,
                           font=self.performer_renderer._font(13*layout['scale']))
@@ -1671,10 +1715,6 @@ class PrivacyApp:
                     draw.rectangle((round(width*.45),0,width,round(40*layout['scale'])),fill=self.BG)
                     draw.text((width-18,round(19*layout['scale'])),'正在重新确认 · 人物画面已暂隐',anchor='ra',
                               fill=self.MUTED,font=self.performer_renderer._font(10*layout['scale']))
-            if protected and self.paint_mask_frames(image):
-                if self.bar is not None and self.bar_shown:self.bar.withdraw()
-                self.bar_shown=False
-                return
             self.clear_mask_frames()
             self.update_bar_picture(image,width,height)
             if self.demo_bar:
@@ -1702,6 +1742,11 @@ class PrivacyApp:
             self.bar.deiconify()
             configure_floating_window(self.bar, click_through=not self.adjusting, no_activate=True)
             self.bar_shown = True
+            self.bar_needs_raise=False
+        elif getattr(self,'bar_needs_raise',False):
+            # Raise once when a new/remapped mask could cover the independent frame.
+            configure_floating_window(self.bar,click_through=not self.adjusting,no_activate=True)
+            self.bar_needs_raise=False
 
     def hide_bar(self, clear_deadline=False):
         if self.bar is not None and (self.bar_shown or getattr(self,'_bar_canvas_mode',None) is not None):
@@ -1817,8 +1862,7 @@ class PrivacyApp:
             self.detail_var.set('先点选要保护的窗口，选好后会开启自动遮挡。')
         elif not self.sensitive.get():
             self.restore()
-        elif self.observer_active and self.valid_observer(self.current_packet()):
-            self.show_mask(automatic=True)
+        else:self.protection_policy().reset()
         self.update_tray()
         self.update_protection_summary()
 
@@ -1872,8 +1916,7 @@ class PrivacyApp:
                 self.save_config()
                 self.detail_var.set(f'已添加第 {len(self.protect_regions)} 个保护区，可再次点击添加。Ctrl+Alt+H 同时遮挡／恢复。')
             cancel()
-            if self.sensitive.get() and self.observer_active and self.valid_observer(self.current_packet()):
-                self.show_mask()
+            self.protection_policy().reset()
         canvas.bind('<ButtonPress-1>', begin)
         canvas.bind('<B1-Motion>', drag)
         canvas.bind('<ButtonRelease-1>', finish)
@@ -1884,7 +1927,7 @@ class PrivacyApp:
 
     def toggle_mask(self):
         if self.mask_active:
-            self.restore()
+            self.manual_restore()
         elif self.has_protection():
             self.show_mask()
         else:
@@ -1895,6 +1938,9 @@ class PrivacyApp:
     def show_mask(self,automatic=False):
         if self.mask_active or not self.has_protection():
             return
+        if not automatic:
+            self.protection_policy().release(time.monotonic(),0)
+            if getattr(self,'cover_notice',None):self.cover_notice.dismiss()
         self.mask_active=True
         self.auto_mask=automatic
         for region in self.protect_regions:
@@ -1905,6 +1951,8 @@ class PrivacyApp:
         self.update_protection_summary()
 
     def restore(self):
+        self.test_cover_until=0.
+        self.protection_policy().reset()
         for mask in self.masks:
             mask.destroy()
         self.masks = []
@@ -1976,6 +2024,7 @@ class PrivacyApp:
         if self.worker:
             self.worker.stop()
         self.recorder.close()
+        if getattr(self,'cover_notice',None):self.cover_notice.dismiss()
         if getattr(self,'performer_panel',None):self.performer_panel.close()
         if self.window_picker:self.window_picker.close()
         if self.recordings_panel:self.recordings_panel.close()

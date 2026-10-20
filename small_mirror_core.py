@@ -151,26 +151,52 @@ def redact_owner(frame, bounds, boxes):
 
 
 def safe_observer_crop(frame, face, bounds, boxes):
-    """Withhold a colliding portrait instead of showing a partly blacked face.
+    """Prefer a complete face, otherwise retain its visible, non-private part.
 
-    Private heads still get the same generous redaction margin. The caller can
-    show its performer without a portrait when two heads cannot be separated.
+    A collision no longer suppresses the entire portrait. Private head margins
+    remain excluded; even a fully covered target retains a redacted live crop.
+    The camera frame is never modified and no previous face is substituted.
     """
+    boxes=list(boxes)
     x,y,w,h=face
     left,top,right,bottom=bounds
     for bx,by,bw,bh in boxes:
         pl,pt,pr,pb=bx-.15*bw,by-.4*bh,bx+1.15*bw,by+1.15*bh
         if min(right,pr)<=max(left,pl) or min(bottom,pb)<=max(top,pt):continue
-        # Tighten excess head padding when a private head is beside it. Keep
-        # the complete detected face, or withhold it if separation is impossible.
+        # First try to retain the complete face by trimming only excess padding.
         choices=[]
         if pr<=x:choices.append((max(left,math.ceil(pr)),top,right,bottom))
         if pl>=x+w:choices.append((left,top,min(right,math.floor(pl)),bottom))
         if pb<=y:choices.append((left,max(top,math.ceil(pb)),right,bottom))
         if pt>=y+h:choices.append((left,top,right,min(bottom,math.floor(pt))))
-        if not choices:return None
+        if not choices:break
         left,top,right,bottom=max(choices,key=lambda rect:(rect[2]-rect[0])*(rect[3]-rect[1]))
-    return frame[top:bottom,left:right].copy() if right>left and bottom>top else None
+    else:
+        return frame[top:bottom,left:right].copy() if right>left and bottom>top else None
+
+    # Split the original crop into disjoint visible rectangles. Using disjoint
+    # pieces bounds the work when several private heads overlap the target.
+    visible=[bounds]
+    for bx,by,bw,bh in boxes:
+        pl,pt,pr,pb=math.floor(bx-.15*bw),math.floor(by-.4*bh),math.ceil(bx+1.15*bw),math.ceil(by+1.15*bh)
+        remaining=[]
+        for left,top,right,bottom in visible:
+            xl,yt,xr,yb=max(left,pl),max(top,pt),min(right,pr),min(bottom,pb)
+            if xl>=xr or yt>=yb:
+                remaining.append((left,top,right,bottom));continue
+            for rect in ((left,top,xl,bottom),(xr,top,right,bottom),
+                         (xl,top,xr,yt),(xl,yb,xr,bottom)):
+                if rect[2]>rect[0] and rect[3]>rect[1]:remaining.append(rect)
+        visible=remaining
+    def score(rect):
+        left,top,right,bottom=rect
+        face_pixels=max(0,min(right,x+w)-max(left,x))*max(0,min(bottom,y+h)-max(top,y))
+        return face_pixels,(right-left)*(bottom-top)
+    best=max(visible,key=score,default=None)
+    if best is not None and score(best)[0]>0:
+        left,top,right,bottom=best
+        return frame[top:bottom,left:right].copy()
+    return redact_owner(frame,bounds,boxes)
 
 
 def observer_crop(face, width, height, roi, eye_mode=False):

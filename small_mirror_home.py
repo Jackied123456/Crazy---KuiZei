@@ -57,7 +57,7 @@ def build_home(app):
     heading=ttk.Frame(outer);heading.grid(row=0,column=0,sticky='ew',pady=(0,round(10*s)))
     ttk.Label(heading,text=PRODUCT_CN,font=('Microsoft YaHei UI',20,'bold')).pack(side='left')
     ttk.Label(heading,text=PRODUCT_EN.upper()+' / '+VERSION_LABEL,style='Beta.TLabel').pack(side='left',padx=round(12*s),pady=(round(5*s),0))
-    ttk.Button(heading,text='收起',style='Quiet.TButton',command=app.hide_settings).pack(side='right')
+    ttk.Button(heading,text='后台运行',style='Quiet.TButton',command=app.hide_settings).pack(side='right')
     ttk.Button(heading,text='设置',style='Quiet.TButton',command=app.open_preferences).pack(side='right',padx=round(5*s))
     app.home_anchor=ttk.Separator(outer);app.home_anchor.grid(row=1,column=0,sticky='ew')
 
@@ -113,12 +113,16 @@ def build_home(app):
     ttk.Separator(checklist).pack(fill='x',pady=round(5*s))
     protection,protection_label,protection_header,protection_description=section('保护窗口',app.region_var,None)
     ttk.Button(protection_header,text='选择窗口',style='Compact.TButton',command=app.open_window_picker).pack(side='right')
-    app.test_mask_button=ttk.Button(protection_description,text='试遮挡',style='Compact.TButton',command=app.test_protection)
-    app.test_mask_button.pack(side='right',padx=(round(6*s),0))
+    actions=ttk.Frame(protection,style='Paper.TFrame');actions.pack(fill='x',pady=(0,round(4*s)))
+    app.test_mask_button=ttk.Button(actions,text='测试遮挡',style='Compact.TButton',command=app.test_protection)
+    app.test_mask_button.pack(side='left')
+    app.manual_mask_button=ttk.Button(actions,text='立即遮挡',style='Compact.TButton',command=app.toggle_mask)
+    app.manual_mask_button.pack(side='left',padx=(round(6*s),0))
+    ttk.Checkbutton(protection,text='发现围观时自动遮挡',variable=app.sensitive,command=app.sensitive_changed).pack(anchor='w')
     protection_label.pack_forget();protection_label.pack(side='left',fill='x',expand=True)
     ttk.Separator(checklist).pack(fill='x',pady=round(5*s))
     actor,actor_label,actor_header,_actor_description=section('回敬动画',app.media_status,None)
-    ttk.Button(actor_header,text='动作与台词',style='Compact.TButton',command=lambda:app.open_preferences('动画')).pack(side='right')
+    ttk.Button(actor_header,text='药水哥设置',style='Compact.TButton',command=app.open_performer_panel).pack(side='right')
 
     control=ttk.Frame(outer);control.grid(row=4,column=0,sticky='ew',pady=(round(12*s),round(5*s)))
     summary=ttk.Label(control,textvariable=app.protection_summary,foreground=app.MUTED,wraplength=round(620*s))
@@ -127,9 +131,9 @@ def build_home(app):
     app.camera_button.pack(side='right')
     app.camera_cancel_button=ttk.Button(control,text='取消启动',style='Compact.TButton',command=lambda:app.toggle_pause(keep_cover=True))
     lower=ttk.Frame(outer);lower.grid(row=5,column=0,sticky='ew',pady=(0,round(5*s)))
-    ttk.Checkbutton(lower,text='保存原始特写',variable=app.record_enabled,command=app.recording_changed).pack(side='left')
-    ttk.Button(lower,text='事件记录',style='Quiet.TButton',command=app.open_stats).pack(side='right')
-    ttk.Button(lower,text='录像',style='Quiet.TButton',command=app.open_recordings).pack(side='right',padx=round(5*s))
+    ttk.Checkbutton(lower,text='自动录像（原始特写）',variable=app.record_enabled,command=app.recording_changed).pack(side='left')
+    ttk.Button(lower,text='统计记录',style='Quiet.TButton',command=app.open_stats).pack(side='right')
+    ttk.Button(lower,text='录像记录',style='Quiet.TButton',command=app.open_recordings).pack(side='right',padx=round(5*s))
     app.footer=ttk.Label(outer,textvariable=app.detail_var,foreground=app.MUTED,wraplength=round(850*s),font=('Microsoft YaHei UI',9))
     app.footer.grid(row=6,column=0,sticky='ew',pady=(0,round(7*s)))
     ttk.Separator(outer).grid(row=7,column=0,sticky='ew')
@@ -148,7 +152,7 @@ def build_home(app):
             elif not subtitle.winfo_manager():subtitle.pack(anchor='w',pady=(round(6*s),0))
         elif event.widget is checklist:
             for label in (owner_label,protection_label,actor_label):
-                reserved=app.test_mask_button.winfo_reqwidth()+round(6*s) if label is protection_label else 0
+                reserved=0
                 label.configure(wraplength=max(60,event.width-round(24*s)-reserved))
     outer.bind('<Configure>',reflow,add='+')
     checklist.bind('<Configure>',reflow,add='+')

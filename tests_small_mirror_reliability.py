@@ -44,10 +44,12 @@ class RecognitionTests(unittest.TestCase):
         tracker.update(None,[face(owner=False)],2.2)
         self.assertNotEqual(tracker.update(None,[face()],2.71)[0]['identity'],'other')
 
-    def test_colliding_private_margin_withholds_face_instead_of_partial_blackout(self):
+    def test_colliding_private_margin_keeps_visible_part_of_face(self):
         frame=np.full((200,400,3),180,np.uint8)
         target=(160,60,60,70)
-        self.assertIsNone(core.safe_observer_crop(frame,target,(140,20,240,150),[(105,80,50,50)]))
+        crop=core.safe_observer_crop(frame,target,(140,20,240,150),[(105,80,50,50)])
+        self.assertIsNotNone(crop);self.assertTrue(np.all(crop==180))
+        self.assertEqual(crop.shape[:2],(130,77))
         crop=core.safe_observer_crop(frame,target,(140,20,240,150),[(20,60,50,50)])
         self.assertTrue(np.all(crop==180));self.assertTrue(np.all(frame==180))
         # A neighboring head touches only crop padding. Trim the padding rather
@@ -55,6 +57,26 @@ class RecognitionTests(unittest.TestCase):
         crop=core.safe_observer_crop(frame,target,(140,20,240,150),[(100,80,45,50)])
         self.assertIsNotNone(crop);self.assertTrue(np.all(crop==180))
         self.assertLess(crop.shape[1],100)
+
+    def test_multiple_private_heads_leave_only_current_observer_pixels(self):
+        frame=np.full((180,320,3),40,np.uint8);face=(100,40,60,70)
+        frame[40:110,100:160]=180
+        boxes=[(60,60,40,45),(160,50,30,60)]
+        # Paint the entire private margins with a sentinel, then prove none of
+        # those pixels appears in the surviving fragment.
+        for x,y,w,h in boxes:
+            frame[max(0,math.floor(y-.4*h)):math.ceil(y+1.15*h),
+                  max(0,math.floor(x-.15*w)):math.ceil(x+1.15*w)]=255
+        original=frame.copy()
+        crop=core.safe_observer_crop(frame,face,(82,0,178,124),boxes)
+        self.assertIsNotNone(crop);self.assertTrue(np.any(crop==180))
+        self.assertFalse(np.any(crop==255));np.testing.assert_array_equal(frame,original)
+
+    def test_fully_occluded_target_keeps_redacted_live_frame_without_owner_pixels(self):
+        frame=np.full((180,320,3),180,np.uint8)
+        crop=core.safe_observer_crop(frame,(100,40,40,40),(88,16,152,88),[(60,0,160,150)])
+        self.assertEqual(crop.shape[:2],(72,64));self.assertTrue(np.all(crop==0))
+        self.assertTrue(np.all(frame==180))
 
     def test_zoom_merge_suppresses_duplicate_faces_after_coordinate_mapping(self):
         rows=[[100,80,30,40]+[0]*10+[.8],[101,81,31,39]+[0]*10+[.9],

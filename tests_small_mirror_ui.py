@@ -47,6 +47,55 @@ class InterfaceTests(unittest.TestCase):
         worker.stop=MagicMock(side_effect=worker.stop_event.set)
         return worker,state
 
+    def test_picker_selects_all_pages_filters_closed_windows_and_can_clear(self):
+        from small_mirror_panels import WindowPicker
+        tokens=[SimpleNamespace(hwnd=i,pid=40,epoch=0,title=f'Test {i}') for i in range(14)]
+        live=set(range(14))
+        api=SimpleNamespace(list_windows=lambda:tokens,valid=lambda token:token.hwnd in live,
+                            thumbnail=lambda *_:None,close_thumbnail=lambda *_:None)
+        picker=WindowPicker(self.app,api);self.app.window_picker=picker
+        picker.turn(1);live.remove(12);picker.select_all()
+        self.assertEqual(len(picker.selected),13);self.assertEqual(picker.page,1)
+        self.assertIn((0,40,0),picker.selected);self.assertIn((13,40,0),picker.selected)
+        self.assertNotIn((12,40,0),picker.selected)
+        picker.clear_selection();self.assertEqual(picker.selected,{})
+        picker.select_all();live.remove(13)
+        with patch.object(self.app,'set_protected_windows') as apply:
+            picker.apply()
+        self.assertEqual(len(apply.call_args.args[0]),12)
+
+    def test_camera_off_test_cover_shows_independent_frame_and_restores_after_three_seconds(self):
+        app=self.app;app.protect_regions=[[40,40,600,400]]
+        with patch.object(mirror.core,'CameraWorker') as camera:
+            app.test_protection();deadline=app.test_cover_until
+            self.assertTrue(app.mask_active);app.tick_once();self.root.update()
+            self.assertTrue(app.bar_shown);self.assertEqual(app.bar.state(),'normal')
+            self.assertTrue(all(not getattr(mask,'_performer_active',False) for mask in app.masks))
+            with patch.object(mirror.time,'monotonic',return_value=deadline+.1):app.tick_once()
+            self.assertFalse(app.mask_active);self.assertEqual(app.masks,[])
+            camera.assert_not_called()
+        self.assertEqual(app.stats.total,0);self.assertFalse(app.recorder.recording)
+        self.assertEqual(app.protection_policy().remaining(time.monotonic()),0)
+
+    def test_manual_restore_notice_can_change_snooze_and_resume_without_opening_camera(self):
+        app=self.app;app.protect_regions=[[40,40,400,300]]
+        app.show_mask();app.manual_restore();self.root.update()
+        self.assertFalse(app.mask_active);self.assertIsNotNone(app.cover_notice)
+        self.assertIn('30 秒',app.protection_summary.get())
+        app.snooze_protection(300);self.assertEqual(app.protection_policy().remaining(time.monotonic()),300)
+        app.resume_protection();self.assertIsNone(app.cover_notice)
+        self.assertEqual(app.protection_policy().remaining(time.monotonic()),0)
+        self.assertIsNone(app.worker)
+
+    def test_home_protection_actions_fit_without_overlap_at_minimum_size(self):
+        app=self.app;self.root.geometry('900x650');self.root.update()
+        a,b=app.test_mask_button,app.manual_mask_button
+        self.assertTrue(a.winfo_ismapped() and b.winfo_ismapped())
+        self.assertGreaterEqual(b.winfo_rootx(),a.winfo_rootx()+a.winfo_width())
+        self.assertLessEqual(b.winfo_rootx()+b.winfo_width(),self.root.winfo_rootx()+self.root.winfo_width())
+        self.assertGreaterEqual(app.preview.winfo_height(),100)
+
+
     def test_first_start_opens_owner_guide_without_claiming_protection(self):
         app=self.app
         with patch.object(app,'open_owner_settings') as guide,patch.object(app,'begin_enrollment') as enroll:

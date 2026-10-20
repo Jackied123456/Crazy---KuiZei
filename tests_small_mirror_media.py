@@ -25,7 +25,12 @@ class MediaTests(unittest.TestCase):
         self.root.mkdir();self.addCleanup(lambda:shutil.rmtree(self.root))
         self.source=self.root/'input';self.source.mkdir()
         self.data=self.root/'data'
-        self.builtin=Path(__file__).parent/'assets'/'yaoshui'
+        # A media-free fixture keeps missing/partial-pack tests independent of
+        # whether this checkout also contains the 12 optional build inputs.
+        self.builtin=self.root/'builtin';self.builtin.mkdir()
+        shutil.copyfile(Path(__file__).parent/'assets/yaoshui/programs.json',self.builtin/'programs.json')
+        builtin=patch('small_mirror_performer.builtin_asset_dir',return_value=self.builtin)
+        builtin.start();self.addCleanup(builtin.stop)
 
     def test_portable_pack_uses_only_matching_programme_and_can_be_disabled(self):
         sidecar=self.root/'Crazy-local-media';sidecar.mkdir()
